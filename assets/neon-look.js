@@ -789,3 +789,123 @@
   window.addEventListener('resize', schedule, { passive: true });
   if (compactMq.addEventListener) compactMq.addEventListener('change', schedule);
 })();
+
+// V28 · UX foundation helpers.
+// Solo mejora accesibilidad/experiencia: foco, navegación activa, inputs táctiles y tablas.
+(() => {
+  let scheduled = false;
+  const compactMq = window.matchMedia ? window.matchMedia('(max-width: 1280px)') : { matches: false, addEventListener() {} };
+
+  function rootApp() {
+    return document.getElementById('app') || document.body;
+  }
+
+  function activeMenuButton() {
+    return document.querySelector('.app-old-mirror .old-menu button.active[data-section]') ||
+      document.querySelector('.app-old-mirror .old-menu button[aria-current="page"][data-section]');
+  }
+
+  function labelFromButton(button) {
+    return button?.querySelector('b')?.textContent?.trim() || button?.textContent?.trim() || '';
+  }
+
+  function normalizeActiveNavigation() {
+    const buttons = Array.from(document.querySelectorAll('.app-old-mirror .old-menu button[data-section]'));
+    buttons.forEach((button) => {
+      const active = button.classList.contains('active');
+      if (active) {
+        button.setAttribute('aria-current', 'page');
+        button.setAttribute('aria-label', `Sección actual: ${labelFromButton(button)}`);
+      } else {
+        button.removeAttribute('aria-current');
+        button.setAttribute('aria-label', `Abrir sección: ${labelFromButton(button)}`);
+      }
+    });
+
+    const active = activeMenuButton();
+    const app = rootApp();
+    const section = active?.getAttribute('data-section') || '';
+    if (section) app.setAttribute('data-f360-active-section', section);
+    if (active && compactMq.matches) {
+      active.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+    }
+  }
+
+  function improveScrollableSemantics(scope = document) {
+    const root = scope?.querySelectorAll ? scope : document;
+    root.querySelectorAll('.app-old-mirror .table-wrap, .app-old-mirror .old-menu, .app-old-mirror .month-strip, .app-old-mirror .chart-bars').forEach((el) => {
+      if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
+      el.setAttribute('data-f360-scrollable', 'true');
+      if (!el.getAttribute('aria-label')) {
+        if (el.classList.contains('table-wrap')) el.setAttribute('aria-label', 'Tabla con desplazamiento');
+        else if (el.classList.contains('old-menu')) el.setAttribute('aria-label', 'Menú principal desplazable');
+        else if (el.classList.contains('month-strip')) el.setAttribute('aria-label', 'Selector de meses desplazable');
+        else el.setAttribute('aria-label', 'Gráfica desplazable');
+      }
+    });
+  }
+
+  function improveFormInputs(scope = document) {
+    const root = scope?.querySelectorAll ? scope : document;
+    root.querySelectorAll('.app-old-mirror input[type="number"]').forEach((input) => {
+      const name = String(input.name || input.id || '').toLowerCase();
+      if (!input.getAttribute('inputmode')) {
+        input.setAttribute('inputmode', name.includes('km') || name.includes('day') || name.includes('count') ? 'numeric' : 'decimal');
+      }
+    });
+
+    root.querySelectorAll('.app-old-mirror input, .app-old-mirror select, .app-old-mirror textarea').forEach((control) => {
+      if (!control.id && control.name) {
+        const form = control.closest('form')?.id || 'field';
+        control.id = `f360-${form}-${control.name}`.replace(/[^a-zA-Z0-9_-]/g, '-');
+      }
+      const label = control.closest('.field')?.querySelector('label');
+      if (label && control.id && !label.getAttribute('for')) label.setAttribute('for', control.id);
+    });
+  }
+
+  function markEmptyAndDenseCards(scope = document) {
+    const root = scope?.querySelectorAll ? scope : document;
+    root.querySelectorAll('.app-old-mirror .section-card').forEach((card) => {
+      card.toggleAttribute('data-has-empty-state', Boolean(card.querySelector('.empty-state, .empty-mini')));
+      const table = card.querySelector('table');
+      if (table) card.setAttribute('data-card-kind', 'table');
+      const form = card.querySelector('form');
+      if (form) card.setAttribute('data-card-kind', 'form');
+    });
+  }
+
+  function apply(scope = document) {
+    normalizeActiveNavigation();
+    improveScrollableSemantics(scope);
+    improveFormInputs(scope);
+    markEmptyAndDenseCards(scope);
+    document.documentElement.classList.add('f360-ux-v28-ready');
+  }
+
+  function schedule(scope = document) {
+    if (scheduled) return;
+    scheduled = true;
+    window.requestAnimationFrame(() => {
+      scheduled = false;
+      apply(scope);
+    });
+  }
+
+  function init() {
+    apply(document);
+    window.setTimeout(() => apply(document), 120);
+    window.setTimeout(() => apply(document), 450);
+    if (window.MutationObserver) {
+      const observer = new MutationObserver(() => schedule(document));
+      observer.observe(rootApp(), { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    }
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
+
+  window.addEventListener('resize', () => schedule(document), { passive: true });
+  if (compactMq.addEventListener) compactMq.addEventListener('change', () => schedule(document));
+})();
+
