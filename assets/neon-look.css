@@ -11168,338 +11168,70 @@ body {
 }
 
 /* ==========================================================
-   HOTFIX V29 · RECUPERACIÓN DE SCROLL + BOTONES + UX SEGURA
-   Objetivo: corregir el bloqueo de navegación causado por el
-   scroll automático del menú y mantener mejoras visuales sin
-   alterar Supabase, cálculos, permisos ni base de datos.
+   HOTFIX SEGURO · Admin contraseña temporal
+   Alcance limitado: solo el campo de contraseña en Admin.
+   No modifica menú, layout global, sidebar, botones generales ni lógica.
 ========================================================== */
-
-:root {
-  --f360-safe-touch: 46px;
-  --f360-safe-gap: clamp(12px, 1.7vw, 22px);
-  --f360-safe-card-pad: clamp(16px, 2.2vw, 28px);
-  --f360-safe-radius: clamp(20px, 2.2vw, 30px);
+.admin-create-user-card .password-field {
+  display: grid !important;
+  align-items: stretch !important;
+  grid-template-columns: 1fr !important;
+  gap: 8px !important;
 }
 
-html {
-  scroll-behavior: auto !important;
-  overflow-x: hidden !important;
+.admin-create-user-card .password-field > label,
+.admin-create-user-card .password-field > .hint {
+  width: 100% !important;
 }
 
-body {
-  overflow-x: hidden !important;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+.admin-create-user-card .password-field .password-wrap {
+  position: relative !important;
+  display: block !important;
+  width: 100% !important;
 }
 
-/* Los controles nunca deben perder el click ni quedar por debajo de capas decorativas. */
-.app-old-mirror button,
-.app-old-mirror .btn,
-.app-old-mirror input,
-.app-old-mirror select,
-.app-old-mirror textarea,
-.app-old-mirror label,
-.app-old-mirror a {
-  position: relative;
-  z-index: 2;
+.admin-create-user-card .password-field .password-wrap input {
+  width: 100% !important;
+  padding-right: 56px !important;
 }
 
-.app-old-mirror button,
-.app-old-mirror .btn,
-.app-old-mirror select,
-.app-old-mirror input:not([type="checkbox"]):not([type="radio"]) {
-  min-height: var(--f360-safe-touch) !important;
+.admin-create-user-card .password-field .password-toggle {
+  position: absolute !important;
+  top: 50% !important;
+  right: 10px !important;
+  left: auto !important;
+  transform: translateY(-50%) !important;
+  width: 38px !important;
+  height: 38px !important;
+  min-width: 38px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border-radius: 14px !important;
+  border: 1px solid rgba(22,119,255,.10) !important;
+  background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(243,248,253,.92)) !important;
+  color: #435873 !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.95),
+    0 8px 18px rgba(18,42,78,.08) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 2 !important;
 }
 
-.app-old-mirror button,
-.app-old-mirror .btn,
-.app-old-mirror .chip {
-  touch-action: manipulation;
+.admin-create-user-card .password-field .password-toggle:hover {
+  transform: translateY(-50%) scale(1.02) !important;
+  border-color: rgba(22,119,255,.18) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    0 12px 24px rgba(18,42,78,.10) !important;
 }
 
-.app-old-mirror button:focus-visible,
-.app-old-mirror .btn:focus-visible,
-.app-old-mirror input:focus-visible,
-.app-old-mirror select:focus-visible,
-.app-old-mirror textarea:focus-visible {
-  outline: 3px solid rgba(76, 147, 255, .34) !important;
-  outline-offset: 3px !important;
+.admin-create-user-card .password-field .password-toggle:active {
+  transform: translateY(-50%) scale(.98) !important;
 }
 
-/* Respiración general sin reescribir el layout completo. */
-.app-old-mirror .content-area.old-content {
-  gap: var(--f360-safe-gap) !important;
-}
-
-.app-old-mirror .section-card,
-.app-old-mirror .card,
-.app-old-mirror .metric,
-.app-old-mirror .table-wrap,
-.app-old-mirror .monthly-contribution-card,
-.app-old-mirror .house-pot-card,
-.app-old-mirror .coach-panel,
-.app-old-mirror .finance-command-center,
-.app-old-mirror .analytics-toolbar.old-analysis {
-  border-radius: var(--f360-safe-radius) !important;
-}
-
-.app-old-mirror .section-card,
-.app-old-mirror .card,
-.app-old-mirror .monthly-contribution-card,
-.app-old-mirror .house-pot-card,
-.app-old-mirror .coach-panel,
-.app-old-mirror .finance-command-center,
-.app-old-mirror .analytics-toolbar.old-analysis {
-  padding: var(--f360-safe-card-pad) !important;
-}
-
-.app-old-mirror .section-header,
-.app-old-mirror .page-head,
-.app-old-mirror .old-title-row {
-  padding: var(--f360-safe-card-pad) !important;
-  border-radius: var(--f360-safe-radius) !important;
-}
-
-.app-old-mirror .section-header h3,
-.app-old-mirror .page-head h2,
-.app-old-mirror .old-title-row h3 {
-  line-height: 1.03 !important;
-  overflow-wrap: anywhere !important;
-}
-
-.app-old-mirror .section-header p,
-.app-old-mirror .page-head p,
-.app-old-mirror .old-title-row p,
-.app-old-mirror .sub,
-.app-old-mirror .hint,
-.app-old-mirror .muted {
-  line-height: 1.5 !important;
-}
-
-.app-old-mirror .grid-main,
-.app-old-mirror .grid-2,
-.app-old-mirror .old-dashboard-grid,
-.app-old-mirror .members-grid,
-.app-old-mirror .categories-grid,
-.app-old-mirror .backup-grid,
-.app-old-mirror .goals-grid,
-.app-old-mirror .household-grid,
-.app-old-mirror .vehicles-grid,
-.app-old-mirror .vehicle-panel-grid,
-.app-old-mirror .analytics-grid,
-.app-old-mirror .analytics-main-grid,
-.app-old-mirror .analytics-compare-grid,
-.app-old-mirror .coach-panel-grid,
-.app-old-mirror .finance-coach-grid,
-.app-old-mirror .metrics-grid,
-.app-old-mirror .old-kpi-grid,
-.app-old-mirror .vehicle-kpi-grid,
-.app-old-mirror .household-summary-grid,
-.app-old-mirror .insights-grid,
-.app-old-mirror .coach-summary-grid,
-.app-old-mirror .guide-steps,
-.app-old-mirror .vehicle-flow-grid,
-.app-old-mirror .indicator-grid,
-.app-old-mirror form,
-.app-old-mirror .form-grid,
-.app-old-mirror .inline-grid,
-.app-old-mirror .filters,
-.app-old-mirror .filters-grid,
-.app-old-mirror .dashboard-filters {
-  gap: var(--f360-safe-gap) !important;
-}
-
-.app-old-mirror .table-wrap {
-  overflow-x: auto !important;
-  overflow-y: visible !important;
-  -webkit-overflow-scrolling: touch !important;
-  max-width: 100% !important;
-}
-
-.app-old-mirror table {
-  max-width: 100% !important;
-}
-
-.app-old-mirror th,
-.app-old-mirror td {
-  vertical-align: middle !important;
-}
-
-/* Corrección principal: en tablet/móvil el menú NO puede ser sticky ni forzar scroll al inicio. */
-@media (max-width: 1180px) {
-  .app.app-sidebar.app-old-mirror {
-    display: grid !important;
-    grid-template-columns: minmax(0, 1fr) !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    overflow-x: hidden !important;
-  }
-
-  .app-old-mirror .old-side,
-  .app-old-mirror .side-nav.old-side {
-    position: static !important;
-    top: auto !important;
-    height: auto !important;
-    min-height: 0 !important;
-    max-height: none !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    overflow: visible !important;
-    border-radius: 0 0 26px 26px !important;
-    z-index: 5 !important;
-  }
-
-  .app-old-mirror .old-menu {
-    display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 10px !important;
-    overflow: visible !important;
-    max-width: 100% !important;
-  }
-
-  .app-old-mirror .old-menu button {
-    width: 100% !important;
-    min-width: 0 !important;
-    max-width: none !important;
-    justify-content: start !important;
-    text-align: left !important;
-  }
-
-  .app-old-mirror .old-menu button b,
-  .app-old-mirror .old-side-brand h1,
-  .app-old-mirror .side-user strong,
-  .app-old-mirror .side-user span {
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    white-space: nowrap !important;
-  }
-
-  .app-old-mirror .content-area.old-content {
-    width: 100% !important;
-    max-width: 100% !important;
-    overflow: visible !important;
-    padding: clamp(14px, 2.6vw, 24px) !important;
-  }
-
-  .app-old-mirror .grid-main,
-  .app-old-mirror .grid-2,
-  .app-old-mirror .old-dashboard-grid,
-  .app-old-mirror .analytics-main-grid,
-  .app-old-mirror .analytics-compare-grid,
-  .app-old-mirror .finance-coach-grid,
-  .app-old-mirror .vehicles-grid,
-  .app-old-mirror .vehicle-panel-grid,
-  .app-old-mirror .household-grid {
-    grid-template-columns: 1fr !important;
-  }
-}
-
-@media (max-width: 760px) {
-  :root {
-    --f360-safe-touch: 48px;
-    --f360-safe-card-pad: 16px;
-    --f360-safe-gap: 14px;
-  }
-
-  .app-old-mirror .old-side,
-  .app-old-mirror .side-nav.old-side {
-    padding: 12px !important;
-    border-radius: 0 0 22px 22px !important;
-  }
-
-  .app-old-mirror .old-menu {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 9px !important;
-  }
-
-  .app-old-mirror .old-menu button {
-    min-height: 48px !important;
-    padding: 9px 10px !important;
-    border-radius: 16px !important;
-  }
-
-  .app-old-mirror .old-menu button span {
-    width: 30px !important;
-    height: 30px !important;
-    min-width: 30px !important;
-  }
-
-  .app-old-mirror .old-menu button b {
-    font-size: .78rem !important;
-  }
-
-  .app-old-mirror .side-footer {
-    display: grid !important;
-    grid-template-columns: 1fr 1fr !important;
-    gap: 9px !important;
-  }
-
-  .app-old-mirror .side-user {
-    grid-column: 1 / -1 !important;
-    min-width: 0 !important;
-  }
-
-  .app-old-mirror .side-footer .btn,
-  .app-old-mirror .side-footer button {
-    width: 100% !important;
-    justify-content: center !important;
-  }
-
-  .app-old-mirror .section-header,
-  .app-old-mirror .page-head,
-  .app-old-mirror .old-title-row {
-    margin-bottom: 0 !important;
-  }
-
-  .app-old-mirror .section-header h3,
-  .app-old-mirror .page-head h2,
-  .app-old-mirror .old-title-row h3 {
-    font-size: clamp(1.55rem, 8vw, 2.25rem) !important;
-    letter-spacing: -0.045em !important;
-  }
-
-  .app-old-mirror .metrics-grid,
-  .app-old-mirror .old-kpi-grid,
-  .app-old-mirror .vehicle-kpi-grid,
-  .app-old-mirror .household-summary-grid,
-  .app-old-mirror .coach-summary-grid,
-  .app-old-mirror .indicator-grid,
-  .app-old-mirror .period-grid.old-period-grid,
-  .app-old-mirror .old-period-grid,
-  .app-old-mirror .quick-actions,
-  .app-old-mirror .inline-grid,
-  .app-old-mirror .filters,
-  .app-old-mirror .filters-grid,
-  .app-old-mirror .dashboard-filters,
-  .app-old-mirror .person-grid,
-  .app-old-mirror .vehicle-meta-grid {
-    grid-template-columns: 1fr !important;
-  }
-
-  .app-old-mirror input,
-  .app-old-mirror select,
-  .app-old-mirror textarea {
-    font-size: 16px !important;
-  }
-}
-
-@media (max-width: 430px) {
-  .app-old-mirror .old-menu {
-    grid-template-columns: 1fr !important;
-  }
-
-  .app-old-mirror .content-area.old-content {
-    padding: 10px !important;
-  }
-
-  .app-old-mirror .section-card,
-  .app-old-mirror .card,
-  .app-old-mirror .monthly-contribution-card,
-  .app-old-mirror .house-pot-card,
-  .app-old-mirror .coach-panel,
-  .app-old-mirror .finance-command-center,
-  .app-old-mirror .analytics-toolbar.old-analysis {
-    padding: 14px !important;
-    border-radius: 20px !important;
-  }
+.admin-create-user-card .password-field > .hint {
+  display: block !important;
+  margin: 0 !important;
 }
