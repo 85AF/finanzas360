@@ -1742,10 +1742,24 @@ const F360V3 = (() => {
 
   function monthStrip() {
     const y = Number(yearOf());
-    const keys = Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2,"0")}`);
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonthNo = now.getMonth() + 1;
+
+    // Esta tira no debe mostrar meses futuros: van apareciendo a medida que el año avanza.
+    // Enero siempre queda primero para que la lectura sea natural y no al revés.
+    const lastVisibleMonth = y < currentYear ? 12 : y === currentYear ? currentMonthNo : 0;
+    const keys = Array.from({ length: Math.max(0, lastVisibleMonth) }, (_, i) => `${y}-${String(i + 1).padStart(2,"0")}`);
+
+    if (!keys.length) {
+      return `<div class="section-card month-history-card month-history-card--empty">
+        <div class="month-card-header"><h4>Meses activos</h4><div class="month-card-actions"><span class="hint">Aún no hay meses activos para ${y}.</span></div></div>
+      </div>`;
+    }
+
     return `<div class="section-card month-history-card">
-      <div class="month-card-header"><h4>Meses anteriores</h4><div class="month-card-actions"><span class="hint">Visible por año. Por defecto: año en curso.</span><select class="compact-select" id="monthStripYear"><option>${y} · año en curso</option></select></div></div>
-      <div class="month-strip">${keys.reverse().map(k => { const m = metricsFor(monthItems(k)); return `<button class="month-pill ${k === activeMonth() ? "active" : ""}" type="button" data-set-month="${k}"><strong>${monthName(k)}</strong><span>${money(m.balance)} · ${m.incomes.length + m.expenses.length} mov.</span></button>`; }).join("")}</div>
+      <div class="month-card-header"><h4>Meses activos de ${y}</h4><div class="month-card-actions"><span class="hint">Solo se muestran los meses que ya van del año. Orden natural: enero primero.</span></div></div>
+      <div class="month-strip f360-month-progress">${keys.map(k => { const m = metricsFor(monthItems(k)); return `<button class="month-pill ${k === activeMonth() ? "active" : ""}" type="button" data-set-month="${k}"><strong>${monthName(k)}</strong><span>${money(m.balance)} · ${m.incomes.length + m.expenses.length} mov.</span></button>`; }).join("")}</div>
     </div>`;
   }
 

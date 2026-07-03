@@ -8314,3 +8314,90 @@ canvas {
     padding: 15px 14px !important;
   }
 }
+
+/* Finanzas 360 · mejora visual de meses activos del dashboard */
+.app-old-mirror .month-history-card {
+  padding: clamp(22px, 2.4vw, 32px) !important;
+}
+
+.app-old-mirror .month-history-card .month-card-header {
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: space-between !important;
+  gap: 18px !important;
+  margin-bottom: 18px !important;
+}
+
+.app-old-mirror .month-history-card .month-card-header h4 {
+  margin: 0 !important;
+  font-size: clamp(1.04rem, 1.15vw, 1.22rem) !important;
+  letter-spacing: -0.02em !important;
+}
+
+.app-old-mirror .month-history-card .month-card-actions {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 10px !important;
+  text-align: right !important;
+}
+
+.app-old-mirror .month-history-card .hint {
+  max-width: 520px !important;
+  font-size: .92rem !important;
+  line-height: 1.35 !important;
+  color: var(--f360-muted, #64748b) !important;
+}
+
+.app-old-mirror .month-strip.f360-month-progress {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)) !important;
+  gap: 14px !important;
+  overflow: visible !important;
+  padding: 0 !important;
+}
+
+.app-old-mirror .month-strip.f360-month-progress .month-pill {
+  width: 100% !important;
+  min-height: 82px !important;
+  justify-content: center !important;
+  align-items: flex-start !important;
+  text-align: left !important;
+  padding: 17px 18px !important;
+  border-radius: 18px !important;
+}
+
+.app-old-mirror .month-strip.f360-month-progress .month-pill strong {
+  display: block !important;
+  font-size: 1rem !important;
+  line-height: 1.18 !important;
+  margin-bottom: 6px !important;
+}
+
+.app-old-mirror .month-strip.f360-month-progress .month-pill span {
+  display: block !important;
+  font-size: .86rem !important;
+  line-height: 1.25 !important;
+}
+
+.app-old-mirror .month-strip.f360-month-progress .month-pill.active {
+  outline: 2px solid color-mix(in srgb, var(--f360-accent, #3b82f6) 55%, transparent) !important;
+  outline-offset: 3px !important;
+}
+
+@media (max-width: 760px) {
+  .app-old-mirror .month-history-card .month-card-header {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    text-align: left !important;
+  }
+
+  .app-old-mirror .month-history-card .month-card-actions {
+    justify-content: flex-start !important;
+    text-align: left !important;
+  }
+
+  .app-old-mirror .month-strip.f360-month-progress {
+    grid-template-columns: 1fr !important;
+  }
+}
