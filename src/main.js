@@ -2221,7 +2221,7 @@ const F360V3 = (() => {
         ? "Sin margen disponible"
         : "Mes cubierto";
     const shortfallHint = shortfallNow > 0
-      ? `Faltan ${money(shortfallNow)}`
+      ? "Aporte extra necesario"
       : "No hace falta aporte extra";
     const currentUserRow = pot.contributorRows.find(row => row.member.user_id === state.user?.id);
     const personalLine = currentUserRow
