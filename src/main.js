@@ -2213,7 +2213,16 @@ const F360V3 = (() => {
       : pot.canPayWithCarry
         ? "Se puede cubrir con sobrante"
         : "Mes cubierto";
-    const statusClass = pot.shortfall > 0 ? "danger" : pot.canPayWithCarry ? "gold" : "ok";
+    const availableNow = Math.max(0, pot.remaining);
+    const shortfallNow = Math.max(0, pot.shortfall);
+    const availableHint = availableNow > 0
+      ? `Quedan ${money(availableNow)} para este mes`
+      : pot.shortfall > 0
+        ? "Sin margen disponible"
+        : "Mes cubierto";
+    const shortfallHint = shortfallNow > 0
+      ? `Faltan ${money(shortfallNow)}`
+      : "No hace falta aporte extra";
     const currentUserRow = pot.contributorRows.find(row => row.member.user_id === state.user?.id);
     const personalLine = currentUserRow
       ? `<div class="house-pot-personal"><span>Tu aporte acordado</span><strong>${money(currentUserRow.expected)}</strong><em>${currentUserRow.status}${currentUserRow.registered ? ` · registrado ${money(currentUserRow.registered)}` : ""}</em></div>`
@@ -2240,10 +2249,18 @@ const F360V3 = (() => {
           <p class="sub">Cada integrante activo aporta ${money(HOUSE_POT_MONTHLY_CONTRIBUTION)}. De ese pote salen alquiler, comida, internet, agua, luz, gas y demás gastos de casa.</p>
           ${personalLine}
         </div>
-        <div class="contribution-big house-pot-big ${statusClass}">
-          <span>Disponible para el mes</span>
-          <strong>${money(Math.max(0, pot.remaining))}</strong>
-          <em>${escapeHtml(statusLabel)}</em>
+        <div class="contribution-big house-pot-big house-pot-split-card">
+          <div class="house-pot-split available">
+            <span>Disponible</span>
+            <strong>${money(availableNow)}</strong>
+            <em>${escapeHtml(availableHint)}</em>
+          </div>
+          <div class="house-pot-divider"></div>
+          <div class="house-pot-split shortfall">
+            <span>Faltante</span>
+            <strong>${money(shortfallNow)}</strong>
+            <em>${escapeHtml(shortfallHint)}</em>
+          </div>
         </div>
       </div>
       <div class="house-pot-stats">

@@ -9212,6 +9212,64 @@ body[data-f360-theme="dark"] .app-old-mirror .history-category-row {
   font-size: clamp(1.35rem, 2.3vw, 2rem) !important;
 }
 
+.app-old-mirror .house-pot-split-card {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr) !important;
+  align-items: stretch !important;
+  gap: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+.app-old-mirror .house-pot-split {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  min-height: 170px !important;
+  padding: 22px 22px 20px !important;
+}
+
+.app-old-mirror .house-pot-split span {
+  color: var(--f360-muted) !important;
+  font-size: .82rem !important;
+  font-weight: 950 !important;
+  text-transform: uppercase !important;
+  letter-spacing: .045em !important;
+}
+
+.app-old-mirror .house-pot-split strong {
+  font-size: clamp(2.4rem, 4vw, 4rem) !important;
+  line-height: .95 !important;
+}
+
+.app-old-mirror .house-pot-split em {
+  color: var(--f360-muted) !important;
+  font-size: .95rem !important;
+  font-style: normal !important;
+}
+
+.app-old-mirror .house-pot-split.available {
+  background: linear-gradient(135deg, rgba(37,165,106,.08), rgba(97,212,160,.03)) !important;
+}
+
+.app-old-mirror .house-pot-split.available strong {
+  color: var(--f360-ok, #25a56a) !important;
+}
+
+.app-old-mirror .house-pot-split.shortfall {
+  background: linear-gradient(135deg, rgba(239,86,112,.08), rgba(255,163,180,.03)) !important;
+}
+
+.app-old-mirror .house-pot-split.shortfall strong {
+  color: var(--f360-danger, #ef5670) !important;
+}
+
+.app-old-mirror .house-pot-divider {
+  width: 1px !important;
+  background: linear-gradient(180deg, transparent, var(--f360-border), transparent) !important;
+}
+
 .app-old-mirror .house-pot-big.ok strong {
   color: var(--f360-ok, #25a56a) !important;
 }
@@ -9411,6 +9469,21 @@ body[data-f360-theme="dark"] .app-old-mirror .history-category-row {
   .app-old-mirror .house-pot-personal {
     width: 100% !important;
     justify-content: space-between !important;
+  }
+  .app-old-mirror .house-pot-split-card {
+    grid-template-columns: 1fr !important;
+  }
+  .app-old-mirror .house-pot-divider {
+    width: 100% !important;
+    height: 1px !important;
+    background: linear-gradient(90deg, transparent, var(--f360-border), transparent) !important;
+  }
+  .app-old-mirror .house-pot-split {
+    min-height: 118px !important;
+    padding: 18px 18px 16px !important;
+  }
+  .app-old-mirror .house-pot-split strong {
+    font-size: clamp(2rem, 13vw, 3.2rem) !important;
   }
 }
 
