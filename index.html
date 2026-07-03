@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Finanzas 360 Real · BBDD + usuarios + roles</title>
+  <meta name="description" content="Gestor financiero familiar con Supabase, base de datos real, usuarios, roles y permisos." />
+  <link rel="stylesheet" href="./assets/styles.css" />
+  <link rel="stylesheet" href="./assets/neon-look.css" />
+</head>
+<body>
+  <noscript>Necesitas activar JavaScript para usar Finanzas 360.</noscript>
+  <div id="app" class="app-shell">
+    <div class="boot-card">
+      <div class="brand-logo">F3</div>
+      <h1>Cargando Finanzas 360 Real…</h1>
+      <p>Preparando conexión segura con la base de datos.</p>
+    </div>
+  </div>
+
+  <template id="config-warning-template">
+    <div class="setup-warning">
+      <div class="brand-logo">F3</div>
+      <h1>Falta configurar Supabase</h1>
+      <p>Edita <strong>src/config.js</strong> y coloca tu <strong>SUPABASE_URL</strong> y <strong>SUPABASE_ANON_KEY</strong>. Luego recarga la app.</p>
+    </div>
+  </template>
+
+  <script type="module" src="./src/main.js"></script>
+  <script src="./assets/neon-look.js" defer></script>
+</body>
+</html>

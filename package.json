@@ -1,0 +1,10 @@
+{
+  "name": "finanzas360-real",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Finanzas 360 Real: app financiera familiar con Supabase, usuarios, roles y permisos.",
+  "scripts": {
+    "start": "python -m http.server 8080",
+    "serve": "python -m http.server 8080"
+  }
+}

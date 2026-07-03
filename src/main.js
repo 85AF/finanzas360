@@ -1,0 +1,1850 @@
+import { supabase, isSupabaseConfigured } from "./supabaseClient.js";
+import { MODULES, PERMISSION_FIELDS, money, todayISO, monthKey, escapeHtml, downloadTextFile, toCSV, sum } from "./utils.js";
+
+const app = document.getElementById("app");
+
+const state = {
+  session: null,
+  user: null,
+  profile: null,
+  households: [],
+  currentHouseholdId: null,
+  currentMember: null,
+  members: [],
+  profilesByUserId: {},
+  permissions: [],
+  categories: [],
+  movements: [],
+  recurring: [],
+  goals: [],
+  vehicles: [],
+  vehicleRecords: [],
+  invitations: [],
+  pendingInvitations: [],
+  activeSection: "dashboard",
+  authMode: "login",
+  authError: "",
+  filters: {
+    person: "me",
+    month: monthKey(),
+    movementType: "all",
+    category: "all",
+    search: "",
+    vehicle: "all",
+    year: String(new Date().getFullYear())
+  },
+  analytics: {
+    periodMonths: 12,
+    compare: "prevMonth",
+    category: "all",
+    top: 7
+  }
+};
+
+const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const parseAmount = (value) => Number(String(value || "0").replace(",", ".")) || 0;
+const dateOnly = (value) => String(value || "").slice(0, 10);
+const activeMonth = () => state.filters.month || monthKey();
+const activeYear = () => Number((state.filters.year || activeMonth().slice(0, 4)) || new Date().getFullYear());
+const isSameMonth = (date, m = activeMonth()) => String(date || "").startsWith(m);
+const isSameYear = (date, y = activeYear()) => String(date || "").slice(0, 4) === String(y);
+
+const INACTIVE_MEMBER_STATUSES = new Set(["inactive", "disabled"]);
+const isActiveMember = (member) => !INACTIVE_MEMBER_STATUSES.has(String(member?.status || "active").toLowerCase());
+
+function activeHouseholdMembers() {
+  return uniqueMembers(state.members).filter(isActiveMember);
+}
+
+function contributionMembers() {
+  const eligible = activeHouseholdMembers().filter(m =>
+    m.user_id &&
+    m.dependent !== true &&
+    m.contributes_income !== false
+  );
+  return eligible.length ? eligible : activeHouseholdMembers().filter(m => m.user_id);
+}
+
+function memberShareRatio(userId, movement = {}) {
+  if (!userId) return 0;
+  const members = contributionMembers();
+  if (!members.some(m => m.user_id === userId)) return 0;
+  const method = movement.share_method || "equal";
+
+  if (method === "income") {
+    const totalIncome = sum(members, m => Number(m.monthly_income || 0));
+    if (totalIncome > 0) {
+      const memberIncome = Number(members.find(m => m.user_id === userId)?.monthly_income || 0);
+      return memberIncome / totalIncome;
+    }
+  }
+
+  if (method === "manual") {
+    const totalPercent = sum(members, m => Number(m.participation_percent || 0));
+    if (totalPercent > 0) {
+      const pctValue = Number(members.find(m => m.user_id === userId)?.participation_percent || 0);
+      return pctValue / totalPercent;
+    }
+  }
+
+  return 1 / Math.max(1, members.length);
+}
+
+function allocateSharedMovementForPerson(movement, personId) {
+  if (!movement?.is_shared || !personId) return movement;
+  const ratio = memberShareRatio(personId, movement);
+  if (ratio <= 0) return null;
+  return {
+    ...movement,
+    amount: Number(movement.amount || 0) * ratio,
+    _original_amount: Number(movement.amount || 0),
+    _allocated: true,
+    _share_ratio: ratio
+  };
+}
+
+function applyPersonFilterWithSharedAllocation(items, person = state.filters.person) {
+  if (person === "all") {
+    if (!canSeeAll()) return applyPersonFilterWithSharedAllocation(items, "me");
+    return [...items];
+  }
+  const targetId = person === "me" ? state.user?.id : person;
+  return items
+    .map(item => {
+      const belongsToPerson = item.user_id === targetId || item.member_id === targetId;
+      if (item.is_shared) return allocateSharedMovementForPerson(item, targetId);
+      return belongsToPerson ? item : null;
+    })
+    .filter(Boolean);
+}
+
+function movementMatchesText(movement, rawSearch = "") {
+  const query = String(rawSearch || "").trim().toLowerCase();
+  if (!query) return true;
+  return [movement.description, movement.notes, categoryName(movement.category_id), memberName(movement.member_id || movement.user_id)]
+    .some(value => String(value || "").toLowerCase().includes(query));
+}
+
+function movementsForMonthPerson(month = activeMonth(), person = state.filters.person, options = {}) {
+  const { respectType = true } = options;
+  let items = getVisibleMovements().filter(x => isSameMonth(x.date, month));
+  if (respectType && state.filters.movementType && state.filters.movementType !== "all") items = items.filter(x => x.type === state.filters.movementType);
+  return applyPersonFilterWithSharedAllocation(items, person);
+}
+
+function showToast(message, tone = "dark") {
+  let toast = document.querySelector(".toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.className = "toast";
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.dataset.tone = tone;
+  toast.style.background = tone === "danger" ? "#991b1b" : tone === "ok" ? "#065f46" : "#172033";
+  toast.classList.add("show");
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => toast.classList.remove("show"), 4200);
+}
+
+function friendlyAuthMessage(error, mode = state.authMode) {
+  const raw = String(error?.message || error || "").toLowerCase();
+
+  if (mode === "login") {
+    if (raw.includes("invalid") || raw.includes("credentials") || raw.includes("login")) {
+      return "Usuario o contraseña incorrectos. Revisa el correo y la clave e inténtalo otra vez.";
+    }
+    if (raw.includes("email not confirmed") || raw.includes("not confirmed")) {
+      return "Tu correo todavía no está confirmado. Revisa tu email antes de entrar.";
+    }
+    if (raw.includes("network") || raw.includes("fetch") || raw.includes("failed")) {
+      return "No se pudo conectar con el servidor. Revisa internet y vuelve a intentarlo.";
+    }
+    return "No pudimos iniciar sesión. Verifica tu usuario y contraseña.";
+  }
+
+  if (raw.includes("already registered") || raw.includes("already exists") || raw.includes("user already")) {
+    return "Ese correo ya está registrado. Prueba entrando con tu contraseña.";
+  }
+  if (raw.includes("password")) return "La contraseña debe tener mínimo 6 caracteres.";
+  if (raw.includes("email")) return "Coloca un correo válido para crear la cuenta.";
+  return error?.message || "No pudimos crear el usuario. Revisa los datos e inténtalo otra vez.";
+}
+
+function setAuthError(message) {
+  state.authError = message;
+  const box = document.getElementById("authMessage");
+  if (box) {
+    box.textContent = message;
+    box.hidden = false;
+  }
+  showToast(message, "danger");
+}
+
+function clearAuthError() {
+  state.authError = "";
+  const box = document.getElementById("authMessage");
+  if (box) {
+    box.textContent = "";
+    box.hidden = true;
+  }
+}
+
+function getCurrentHousehold() {
+  return state.households.find(h => h.id === state.currentHouseholdId) || null;
+}
+
+function isAdmin() {
+  return state.currentMember?.role === "admin" || getCurrentHousehold()?.owner_id === state.user?.id;
+}
+
+function permissionFor(module) {
+  return state.permissions.find(p => p.module === module && p.user_id === state.user?.id);
+}
+
+function can(module, action = "view") {
+  if (isAdmin()) return true;
+  const key = action === "view" ? "can_view" : action === "create" ? "can_create" : action === "edit" ? "can_edit" : "can_delete";
+  return Boolean(permissionFor(module)?.[key]);
+}
+
+function uniqueMembers(list = state.members) {
+  const seen = new Map();
+  (list || []).forEach(member => {
+    if (!member) return;
+    const key = member.user_id || member.id || member.email || member.display_name;
+    if (!key) return;
+    const previous = seen.get(key);
+    if (!previous) {
+      seen.set(key, member);
+      return;
+    }
+    const score = item =>
+      (item.status === "active" ? 8 : 0) +
+      (item.role === "admin" ? 4 : 0) +
+      (item.user_id === state.user?.id ? 2 : 0) +
+      (item.display_name ? 1 : 0);
+    if (score(member) >= score(previous)) seen.set(key, { ...previous, ...member });
+  });
+  return [...seen.values()];
+}
+
+function visibleMembers(includeInactive = false) {
+  return uniqueMembers(state.members).filter(m => includeInactive || isActiveMember(m));
+}
+
+function filterPersonOptions() {
+  const options = [];
+  if (canSeeAll()) options.push(`<option value="all" ${state.filters.person === "all" ? "selected" : ""}>Todo el hogar</option>`);
+  options.push(`<option value="me" ${state.filters.person === "me" ? "selected" : ""}>Mi información</option>`);
+  if (canSeeAll()) {
+    visibleMembers().forEach(m => {
+      if (!m.user_id || m.user_id === state.user?.id) return;
+      options.push(`<option value="${m.user_id}" ${state.filters.person === m.user_id ? "selected" : ""}>${escapeHtml(memberName(m.user_id))}</option>`);
+    });
+  }
+  return options.join("");
+}
+
+function memberRecord(userId) {
+  return visibleMembers(true).find(m => m.user_id === userId) || null;
+}
+
+function memberName(userId) {
+  if (!userId) return "Sin usuario";
+  const m = memberRecord(userId);
+  const p = state.profilesByUserId[userId];
+  if (m?.display_name) return m.display_name;
+  if (p?.full_name) return p.full_name;
+  if (p?.email) return p.email;
+  if (userId === state.user?.id) return state.profile?.full_name || state.user.email;
+  return "Usuario";
+}
+
+function categoryName(id) {
+  return state.categories.find(c => c.id === id)?.name || "Sin categoría";
+}
+
+function categoryOptions(type = "all", selected = "") {
+  const cats = state.categories.filter(c => c.type === "both" || type === "all" || c.type === type);
+  return `<option value="">Sin categoría</option>${cats.map(c => `<option value="${c.id}" ${selected === c.id ? "selected" : ""}>${escapeHtml(c.name)} · ${escapeHtml(c.type)}</option>`).join("")}`;
+}
+
+function memberOptions(selected = state.user?.id) {
+  return visibleMembers(true)
+    .filter(m => m.user_id)
+    .map(m => `<option value="${m.user_id}" ${selected === m.user_id ? "selected" : ""}>${escapeHtml(memberName(m.user_id))}</option>`)
+    .join("");
+}
+
+function canSeeAll() {
+  return isAdmin() || can("reports", "view");
+}
+
+function visibleModules() {
+  return MODULES.filter(m => {
+    if (m.key === "admin") return isAdmin();
+    return can(m.key, "view") || m.key === "dashboard";
+  });
+}
+
+function getVisibleMovements(base = state.movements) {
+  if (isAdmin()) return [...base];
+  return base.filter(x => x.user_id === state.user.id || x.member_id === state.user.id || x.is_shared);
+}
+
+function getMovementsFiltered() {
+  let items = getVisibleMovements();
+  if (state.filters.month) items = items.filter(x => isSameMonth(x.date));
+  if (state.filters.movementType !== "all") items = items.filter(x => x.type === state.filters.movementType);
+  if (state.filters.category && state.filters.category !== "all") items = items.filter(x => x.category_id === state.filters.category);
+  if (state.filters.search) items = items.filter(x => movementMatchesText(x, state.filters.search));
+  return applyPersonFilterWithSharedAllocation(items, state.filters.person);
+}
+
+function metricsFor(items) {
+  const incomes = items.filter(x => x.type === "income");
+  const expenses = items.filter(x => x.type === "expense");
+  const totalIncome = sum(incomes, x => x.amount);
+  const totalExpense = sum(expenses, x => x.amount);
+  const sharedExpense = sum(expenses.filter(x => x.is_shared), x => x.amount);
+  const balance = totalIncome - totalExpense;
+  return { incomes, expenses, totalIncome, totalExpense, sharedExpense, balance };
+}
+
+async function withError(promise, successMessage) {
+  const { data, error } = await promise;
+  if (error) {
+    console.error(error);
+    showToast(error.message || "Ocurrió un error", "danger");
+    throw error;
+  }
+  if (successMessage) showToast(successMessage, "ok");
+  return data;
+}
+
+async function init() {
+  if (!isSupabaseConfigured()) {
+    app.innerHTML = document.getElementById("config-warning-template").innerHTML;
+    return;
+  }
+  const { data } = await supabase.auth.getSession();
+  state.session = data.session;
+  state.user = data.session?.user || null;
+
+  supabase.auth.onAuthStateChange(async (_event, session) => {
+    state.session = session;
+    state.user = session?.user || null;
+    if (state.user) await loadWorkspace();
+    render();
+  });
+
+  if (state.user) await loadWorkspace();
+  render();
+}
+
+async function loadWorkspace() {
+  await ensureProfile();
+  await loadPendingInvitations();
+  await loadHouseholds();
+  if (!state.currentHouseholdId && state.households.length) state.currentHouseholdId = state.households[0].id;
+  if (state.currentHouseholdId) await loadHouseholdData();
+}
+
+async function ensureProfile() {
+  const metaName = state.user.user_metadata?.full_name || state.user.email?.split("@")[0] || "Usuario";
+  await supabase.from("profiles").upsert({ user_id: state.user.id, email: state.user.email, full_name: metaName }, { onConflict: "user_id" });
+  const { data, error } = await supabase.from("profiles").select("*").eq("user_id", state.user.id).single();
+  if (!error) state.profile = data;
+}
+
+async function loadPendingInvitations() {
+  const { data, error } = await supabase.from("invitations").select("*, households(name)").eq("status", "pending").order("created_at", { ascending: false });
+  if (!error) state.pendingInvitations = data || [];
+}
+
+async function loadHouseholds() {
+  const { data, error } = await supabase.from("households").select("*").order("created_at", { ascending: true });
+  if (error) {
+    console.error(error);
+    state.households = [];
+    return;
+  }
+  state.households = data || [];
+  if (state.currentHouseholdId && !state.households.some(h => h.id === state.currentHouseholdId)) state.currentHouseholdId = state.households[0]?.id || null;
+}
+
+async function safeSelect(table, queryBuilder, fallback = []) {
+  const { data, error } = await queryBuilder;
+  if (error) {
+    console.warn(`No se pudo cargar ${table}:`, error.message);
+    return fallback;
+  }
+  return data || fallback;
+}
+
+async function loadHouseholdData() {
+  const householdId = state.currentHouseholdId;
+  const [members, permissions, categories, movements, goals, vehicles, invitations, records, recurring] = await Promise.all([
+    safeSelect("household_members", supabase.from("household_members").select("*").eq("household_id", householdId).order("created_at", { ascending: true })),
+    safeSelect("permissions", supabase.from("permissions").select("*").eq("household_id", householdId)),
+    safeSelect("categories", supabase.from("categories").select("*").eq("household_id", householdId).order("name")),
+    safeSelect("movements", supabase.from("movements").select("*").eq("household_id", householdId).order("date", { ascending: false }).order("created_at", { ascending: false })),
+    safeSelect("goals", supabase.from("goals").select("*").eq("household_id", householdId).order("created_at", { ascending: false })),
+    safeSelect("vehicles", supabase.from("vehicles").select("*").eq("household_id", householdId).order("created_at", { ascending: false })),
+    safeSelect("invitations", supabase.from("invitations").select("*").eq("household_id", householdId).order("created_at", { ascending: false })),
+    safeSelect("vehicle_records", supabase.from("vehicle_records").select("*").eq("household_id", householdId).order("date", { ascending: false })),
+    safeSelect("recurring_movements", supabase.from("recurring_movements").select("*").eq("household_id", householdId).order("created_at", { ascending: false }))
+  ]);
+
+  state.members = uniqueMembers(members);
+  state.currentMember = state.members.find(m => m.user_id === state.user.id && isActiveMember(m)) || state.members.find(m => m.user_id === state.user.id) || null;
+  state.permissions = permissions;
+  state.categories = categories;
+  state.movements = movements;
+  state.goals = goals;
+  state.vehicles = vehicles;
+  state.invitations = invitations;
+  state.vehicleRecords = records;
+  state.recurring = recurring;
+
+  const userIds = [...new Set(state.members.map(m => m.user_id).filter(Boolean))];
+  if (userIds.length) {
+    const { data: profiles } = await supabase.from("profiles").select("*").in("user_id", userIds);
+    state.profilesByUserId = Object.fromEntries((profiles || []).map(p => [p.user_id, p]));
+  } else {
+    state.profilesByUserId = {};
+  }
+}
+
+function render() {
+  if (!state.user) return renderAuth();
+  if (state.pendingInvitations.length && !state.households.length) return renderInvitationLanding();
+  if (!state.households.length) return renderCreateHousehold();
+  renderApp();
+}
+
+function passwordFieldHtml(name = "password", placeholder = "mínimo 6 caracteres") {
+  return `
+    <div class="field password-field">
+      <label>Contraseña</label>
+      <div class="password-wrap">
+        <input name="${name}" type="password" placeholder="${escapeHtml(placeholder)}" autocomplete="current-password" required minlength="6" />
+        <button type="button" class="password-toggle" aria-label="Ver contraseña" title="Ver contraseña">👁️</button>
+      </div>
+    </div>`;
+}
+
+function renderAuth() {
+  app.className = "app-shell";
+  app.innerHTML = `
+    <section class="auth-wrap">
+      <div class="auth-hero">
+        <div class="brand-logo">F3</div>
+        <h1>Finanzas 360 Real.</h1>
+        <p class="sub">Base de datos real, usuarios, roles, permisos y hogar compartido. Nada de depender de la caché del navegador.</p>
+        <div class="grid-3 auth-features" style="margin-top:18px">
+          <div class="metric"><div class="top"><small>BBDD</small><span class="icon">🗄️</span></div><strong>Supabase</strong><em>PostgreSQL con seguridad RLS.</em></div>
+          <div class="metric good"><div class="top"><small>Usuarios</small><span class="icon">👥</span></div><strong>Roles</strong><em>Admin, miembro y lectura.</em></div>
+          <div class="metric warn"><div class="top"><small>Online</small><span class="icon">🌐</span></div><strong>24/7</strong><em>Listo para Vercel o GitHub Pages.</em></div>
+        </div>
+      </div>
+      <div class="auth-card">
+        <div class="auth-tabs">
+          <button class="btn ${state.authMode === "login" ? "active dark" : "ghost"}" data-auth-mode="login" type="button">Entrar</button>
+          <button class="btn ${state.authMode === "signup" ? "active dark" : "ghost"}" data-auth-mode="signup" type="button">Crear cuenta</button>
+        </div>
+        <form id="authForm">
+          ${state.authMode === "signup" ? `<div class="field"><label>Nombre</label><input name="full_name" placeholder="Ej. Alberto" autocomplete="name" required /></div>` : ""}
+          <div class="field"><label>Email</label><input name="email" type="email" placeholder="correo@dominio.com" autocomplete="email" required /></div>
+          ${passwordFieldHtml("password")}
+          <button class="btn primary block" type="submit">${state.authMode === "login" ? "Entrar a mi hogar" : "Crear mi usuario"}</button>
+          <div id="authMessage" class="auth-message" role="alert" aria-live="polite" ${state.authError ? "" : "hidden"}>${escapeHtml(state.authError)}</div>
+        </form>
+        <p class="hint">La primera persona que crea el hogar queda como administrador. Luego puede invitar familiares y definir permisos.</p>
+      </div>
+    </section>
+  `;
+  $$('[data-auth-mode]').forEach(btn => btn.addEventListener("click", () => { state.authMode = btn.dataset.authMode; state.authError = ""; renderAuth(); }));
+  bindPasswordToggles();
+  $("#authForm").addEventListener("submit", handleAuth);
+}
+
+function bindPasswordToggles() {
+  $$(".password-toggle").forEach(btn => btn.addEventListener("click", () => {
+    const input = btn.closest(".password-wrap")?.querySelector("input");
+    if (!input) return;
+    input.type = input.type === "password" ? "text" : "password";
+    btn.textContent = input.type === "password" ? "👁️" : "🙈";
+  }));
+}
+
+async function handleAuth(event) {
+  event.preventDefault();
+  clearAuthError();
+
+  const form = event.currentTarget;
+  const submitBtn = form.querySelector('button[type="submit"]');
+  const f = new FormData(form);
+  const email = String(f.get("email") || "").trim().toLowerCase();
+  const password = String(f.get("password") || "");
+
+  if (!email || !password) {
+    return setAuthError("Coloca tu correo y tu contraseña para poder entrar.");
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.dataset.originalText = submitBtn.textContent;
+    submitBtn.textContent = state.authMode === "login" ? "Validando…" : "Creando…";
+  }
+
+  try {
+    if (state.authMode === "signup") {
+      const fullName = String(f.get("full_name") || "").trim();
+      const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } });
+      if (error) return setAuthError(friendlyAuthMessage(error, "signup"));
+      showToast("Usuario creado. Si Supabase pide confirmar correo, revisa Gmail. Luego entra con tu usuario.", "ok");
+      state.authMode = "login";
+      state.authError = "";
+      renderAuth();
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) return setAuthError(friendlyAuthMessage(error, "login"));
+      clearAuthError();
+      showToast("Sesión iniciada.", "ok");
+    }
+  } catch (error) {
+    setAuthError(friendlyAuthMessage(error, state.authMode));
+  } finally {
+    if (submitBtn && document.body.contains(submitBtn)) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = submitBtn.dataset.originalText || (state.authMode === "login" ? "Entrar a mi hogar" : "Crear mi usuario");
+    }
+  }
+}
+
+function renderInvitationLanding() {
+  app.className = "app-shell";
+  app.innerHTML = `
+    <section class="setup-warning">
+      <div class="brand-logo">F3</div>
+      <h1>Tienes invitaciones pendientes</h1>
+      <p>Elige el hogar al que quieres entrar.</p>
+      <div class="form-grid" style="margin-top:16px">
+        ${state.pendingInvitations.map(i => `<article class="section-card"><h4>${escapeHtml(i.households?.name || "Hogar")}</h4><p class="sub">Rol: ${escapeHtml(i.role)}</p><button class="btn primary" data-accept-invite="${i.id}">Aceptar invitación</button></article>`).join("")}
+      </div>
+      <button class="btn ghost" id="logoutBtn" style="margin-top:14px">Salir</button>
+    </section>`;
+  bindCommonActions();
+}
+
+function renderCreateHousehold() {
+  app.className = "app-shell";
+  app.innerHTML = `
+    <section class="setup-warning">
+      <div class="brand-logo">F3</div>
+      <h1>Crea tu hogar financiero</h1>
+      <p>Este será el espacio principal donde se guardan movimientos, gastos de casa, miembros, vehículos, metas y permisos.</p>
+      <form id="householdForm" style="margin-top:18px">
+        <div class="field"><label>Nombre del hogar</label><input name="name" required placeholder="Ej. Familia Fernández" /></div>
+        <button class="btn primary block" type="submit">Crear hogar y entrar como admin</button>
+        <button class="btn ghost block" type="button" id="logoutBtn">Salir</button>
+      </form>
+    </section>`;
+  $("#householdForm").addEventListener("submit", createHousehold);
+  $("#logoutBtn")?.addEventListener("click", () => supabase.auth.signOut());
+}
+
+async function createHousehold(event) {
+  event.preventDefault();
+  const name = new FormData(event.currentTarget).get("name");
+  const household = await withError(supabase.from("households").insert({ name, owner_id: state.user.id }).select("*").single(), "Hogar creado.");
+  state.currentHouseholdId = household.id;
+  await loadWorkspace();
+  renderApp();
+}
+
+function renderApp() {
+  app.className = "app app-sidebar";
+  const currentHousehold = getCurrentHousehold();
+  const modules = visibleModules();
+  app.innerHTML = `
+    <aside class="side-nav" aria-label="Menú principal">
+      <div class="side-brand">
+        <div class="brand-logo">F3</div>
+        <div><h1>Finanzas 360 Real</h1><span>${escapeHtml(currentHousehold?.name || "Hogar")}</span></div>
+      </div>
+      ${state.households.length > 1 ? `<div class="field"><label>Hogar activo</label><select id="householdSwitcher">${state.households.map(h => `<option value="${h.id}" ${h.id === state.currentHouseholdId ? "selected" : ""}>${escapeHtml(h.name)}</option>`).join("")}</select></div>` : ""}
+      <nav class="nav side-menu">
+        ${modules.map(m => `<button type="button" class="${state.activeSection === m.key ? "active" : ""}" data-section="${m.key}"><span>${m.icon}</span><b>${m.label}</b></button>`).join("")}
+      </nav>
+      <div class="side-footer">
+        <div class="side-user"><strong>${escapeHtml(state.profile?.full_name || state.user.email)}</strong><span>${escapeHtml(state.currentMember?.role || "usuario")}</span></div>
+        <button class="btn ghost small" id="refreshBtn">↻ Actualizar</button>
+        <button class="btn danger small" id="logoutBtn">Salir</button>
+      </div>
+    </aside>
+    <main class="content-area">
+      ${renderSection()}
+    </main>
+  `;
+  bindCommonActions();
+  bindSectionActions();
+}
+
+function renderSection() {
+  const section = can(state.activeSection, "view") || state.activeSection === "dashboard" ? state.activeSection : "dashboard";
+  if (section === "dashboard") return renderDashboard();
+  if (section === "register") return renderRegister();
+  if (section === "movements") return renderMovements();
+  if (section === "recurring") return renderRecurring();
+  if (section === "household") return renderHousehold();
+  if (section === "categories") return renderCategories();
+  if (section === "goals") return renderGoals();
+  if (section === "vehicles") return renderVehicles();
+  if (section === "reports") return renderReports();
+  if (section === "history") return renderHistory();
+  if (section === "backup") return renderBackup();
+  if (section === "admin") return renderAdmin();
+  return renderDashboard();
+}
+
+function renderFilters(extra = "") {
+  return `
+    <div class="filters command-bar">
+      <div class="field"><label>Mes activo</label><input id="filterMonth" type="month" value="${escapeHtml(state.filters.month)}" /></div>
+      <div class="field"><label>Vista</label><select id="filterPerson">${filterPersonOptions()}</select></div>
+      ${extra}
+    </div>
+  `;
+}
+
+function renderDashboard() {
+  const items = getMovementsFiltered();
+  const metrics = metricsFor(items);
+  const byCategory = getExpenseCategories(items).slice(0, 7);
+  const recent = items.slice(0, 8);
+  const recurringActive = state.recurring.filter(r => r.active !== false).length;
+  const vehicleSpent = vehicleTotalSpent(null, activeYear());
+  const savingsRate = metrics.totalIncome ? Math.round((metrics.balance / metrics.totalIncome) * 100) : 0;
+
+  return `
+    <section class="page-head">
+      <span class="eyebrow">🛡️ Base de datos real · roles · hogar compartido</span>
+      <h2>Panel financiero</h2>
+      <p>Controla ingresos, gastos, casa común, vehículos, recurrentes y metas desde una BBDD real.</p>
+    </section>
+    ${renderFilters(`<div class="field"><label>Tipo</label><select id="filterType"><option value="all" ${state.filters.movementType === "all" ? "selected" : ""}>Todos</option><option value="income" ${state.filters.movementType === "income" ? "selected" : ""}>Ingresos</option><option value="expense" ${state.filters.movementType === "expense" ? "selected" : ""}>Gastos</option></select></div>`)}
+    <section class="metrics-grid">
+      <article class="metric good"><div class="top"><small>Ingresos</small><span class="icon">↗</span></div><strong>${money(metrics.totalIncome)}</strong><em>${metrics.incomes.length} registros</em></article>
+      <article class="metric bad"><div class="top"><small>Gastos</small><span class="icon">↘</span></div><strong>${money(metrics.totalExpense)}</strong><em>${metrics.expenses.length} registros</em></article>
+      <article class="metric warn"><div class="top"><small>Casa común</small><span class="icon">🏠</span></div><strong>${money(metrics.sharedExpense)}</strong><em>Gastos compartidos</em></article>
+      <article class="metric ${metrics.balance >= 0 ? "good" : "bad"}"><div class="top"><small>Balance</small><span class="icon">=</span></div><strong>${money(metrics.balance)}</strong><em>${savingsRate}% de ahorro</em></article>
+      <article class="metric"><div class="top"><small>Recurrentes</small><span class="icon">🔁</span></div><strong>${recurringActive}</strong><em>Pagos activos</em></article>
+      <article class="metric"><div class="top"><small>Vehículos año</small><span class="icon">🚘</span></div><strong>${money(vehicleSpent)}</strong><em>${activeYear()}</em></article>
+    </section>
+    <section class="grid-2">
+      <article class="section-card dark-panel">
+        <h4>Gastos por categoría</h4>
+        <p class="sub">Top de gastos del periodo activo.</p>
+        <div class="form-grid">
+          ${byCategory.length ? byCategory.map(c => {
+            const pct = metrics.totalExpense ? Math.min(100, Math.round((c.total / metrics.totalExpense) * 100)) : 0;
+            return `<div class="progress-row"><div class="progress-meta"><span>${escapeHtml(c.name)}</span><strong>${money(c.total)}</strong></div><div class="bar"><span style="width:${pct}%"></span></div></div>`;
+          }).join("") : `<div class="empty-state"><strong>Sin gastos todavía</strong>Registra movimientos para ver el análisis.</div>`}
+        </div>
+      </article>
+      <article class="section-card">
+        <h4>Últimos movimientos</h4>
+        <p class="sub">Lo más reciente cargado en la BBDD.</p>
+        ${renderMovementTable(recent, false)}
+      </article>
+    </section>
+    <section class="grid-2">
+      <article class="section-card">${renderHouseholdMini()}</article>
+      <article class="section-card">${renderVehicleMini()}</article>
+    </section>
+  `;
+}
+
+function getExpenseCategories(items = getMovementsFiltered()) {
+  return Object.values(items.filter(x => x.type === "expense").reduce((acc, x) => {
+    const name = categoryName(x.category_id);
+    acc[name] ||= { name, total: 0, count: 0 };
+    acc[name].total += Number(x.amount || 0);
+    acc[name].count += 1;
+    return acc;
+  }, {})).sort((a, b) => b.total - a.total);
+}
+
+function renderRegister() {
+  return `
+    <section class="page-head"><h2>Registrar</h2><p>Carga ingresos, gastos personales, gastos comunes del hogar o pagos rápidos.</p></section>
+    <section class="grid-main">
+      <article class="section-card">
+        <h4>Nuevo ingreso / gasto</h4>
+        <form id="movementForm">
+          <div class="inline-grid"><div class="field"><label>Tipo</label><select name="type" required><option value="expense">Gasto</option><option value="income">Ingreso</option></select></div><div class="field"><label>Monto</label><input name="amount" type="number" step="0.01" min="0" required placeholder="0,00" /></div></div>
+          <div class="inline-grid"><div class="field"><label>Fecha</label><input name="date" type="date" value="${todayISO()}" required /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions()}</select></div></div>
+          ${canSeeAll() ? `<div class="field"><label>Asignar a integrante</label><select name="member_id">${memberOptions(state.user.id)}</select></div>` : `<input type="hidden" name="member_id" value="${state.user.id}" />`}
+          <div class="field"><label>Descripción</label><textarea name="description" placeholder="Ej. Mercado, nómina, gasolina, alquiler..."></textarea></div>
+          <label class="switch-row"><span><strong>Movimiento común del hogar</strong><br><span class="hint">Úsalo para alquiler, comida, luz, agua, gas, internet, comunidad, etc.</span></span><input name="is_shared" type="checkbox" /></label>
+          <button class="btn primary" type="submit">Guardar en BBDD</button>
+        </form>
+      </article>
+      <article class="section-card dark-panel">
+        <h4>Guía rápida</h4>
+        <div class="guide-steps single">
+          <div class="guide-step-card"><span class="step-marker">1</span><div><b>Datos personales</b><span>Cada usuario registra lo suyo con su cuenta.</span></div></div>
+          <div class="guide-step-card"><span class="step-marker">2</span><div><b>Gastos comunes</b><span>Marca compartido para casa, comida, servicios o alquiler.</span></div></div>
+          <div class="guide-step-card"><span class="step-marker">3</span><div><b>Admin</b><span>Puede ver todo o filtrar por integrante.</span></div></div>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderMovements() {
+  const extra = `<div class="field"><label>Tipo</label><select id="filterType"><option value="all" ${state.filters.movementType === "all" ? "selected" : ""}>Todos</option><option value="income" ${state.filters.movementType === "income" ? "selected" : ""}>Ingresos</option><option value="expense" ${state.filters.movementType === "expense" ? "selected" : ""}>Gastos</option></select></div>`;
+  const items = getMovementsFiltered();
+  return `<section class="page-head"><h2>Movimientos</h2><p>Consulta, filtra, edita y elimina según tus permisos.</p></section><article class="section-card">${renderFilters(extra)}${renderMovementTable(items, true)}</article>`;
+}
+
+function renderMovementTable(items, actions = true) {
+  if (!items.length) return `<div class="empty-state"><strong>No hay movimientos</strong>Cuando alguien registre datos, aparecerán aquí.</div>`;
+  return `
+    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Categoría</th><th>Persona</th><th>Importe</th>${actions ? "<th>Acciones</th>" : ""}</tr></thead><tbody>
+      ${items.map(x => `<tr><td>${escapeHtml(dateOnly(x.date))}</td><td><span class="tag ${x.type === "income" ? "income" : "expense"}">${x.type === "income" ? "Ingreso" : "Gasto"}</span>${x.is_shared ? ` <span class="tag neutral">Común</span>` : ""}</td><td>${escapeHtml(x.description || "Sin descripción")}</td><td>${escapeHtml(categoryName(x.category_id))}</td><td>${escapeHtml(memberName(x.member_id || x.user_id))}</td><td><strong>${money(x.amount)}</strong></td>${actions ? `<td><div class="td-actions"><button class="btn small" data-edit-movement="${x.id}">Editar</button><button class="btn small danger" data-delete-movement="${x.id}">Borrar</button></div></td>` : ""}</tr>`).join("")}
+    </tbody></table></div>`;
+}
+
+function renderRecurring() {
+  return `
+    <section class="page-head"><h2>Recurrentes</h2><p>Pagos automáticos como nómina, alquiler, comida de mascota, suscripciones, seguros o servicios.</p></section>
+    <section class="grid-main">
+      <article class="section-card">
+        <h4>Nuevo recurrente</h4>
+        <form id="recurringForm">
+          <div class="inline-grid"><div class="field"><label>Tipo</label><select name="type"><option value="expense">Gasto</option><option value="income">Ingreso</option></select></div><div class="field"><label>Monto</label><input name="amount" type="number" step="0.01" min="0" required /></div></div>
+          <div class="inline-grid"><div class="field"><label>Día del mes</label><input name="day_of_month" type="number" min="1" max="31" value="1" /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions()}</select></div></div>
+          ${canSeeAll() ? `<div class="field"><label>Responsable</label><select name="member_id">${memberOptions(state.user.id)}</select></div>` : `<input type="hidden" name="member_id" value="${state.user.id}" />`}
+          <div class="field"><label>Concepto</label><input name="description" placeholder="Ej. Nómina DirectMarkt, alquiler, Netflix..." required /></div>
+          <label class="switch-row"><span><strong>Compartido</strong><br><span class="hint">Actívalo si este pago pertenece al hogar.</span></span><input name="is_shared" type="checkbox" /></label>
+          <button class="btn primary" type="submit">Guardar recurrente</button>
+        </form>
+      </article>
+      <article class="section-card">
+        <h4>Recurrentes activos</h4>
+        ${state.recurring.length ? `<div class="table-wrap"><table><thead><tr><th>Concepto</th><th>Tipo</th><th>Día</th><th>Persona</th><th>Monto</th><th>Estado</th></tr></thead><tbody>${state.recurring.map(r => `<tr><td>${escapeHtml(r.description)}</td><td>${r.type === "income" ? "Ingreso" : "Gasto"}</td><td>${escapeHtml(r.day_of_month || "-")}</td><td>${escapeHtml(memberName(r.member_id || r.user_id))}</td><td><strong>${money(r.amount)}</strong></td><td>${r.active === false ? "Pausado" : "Activo"}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>Sin recurrentes</strong>Agrega pagos fijos para tener proyección mensual.</div>`}
+      </article>
+    </section>`;
+}
+
+function renderHousehold() {
+  const items = getVisibleMovements().filter(x => isSameMonth(x.date));
+  const metrics = metricsFor(items);
+  return `
+    <section class="page-head"><h2>Casa común y aportes</h2><p>Quién ingresa, quién paga, qué parte corresponde a cada persona y cuánto queda disponible.</p></section>
+    ${renderFilters(`<div></div>`)}
+    <section class="metrics-grid">
+      <article class="metric"><div class="top"><small>Integrantes</small><span class="icon">👥</span></div><strong>${state.members.length}</strong><em>Usuarios del hogar</em></article>
+      <article class="metric warn"><div class="top"><small>Gastos comunes</small><span class="icon">🏠</span></div><strong>${money(metrics.sharedExpense)}</strong><em>Mes activo</em></article>
+      <article class="metric good"><div class="top"><small>Ingresos hogar</small><span class="icon">↗</span></div><strong>${money(metrics.totalIncome)}</strong><em>Visibles</em></article>
+      <article class="metric ${metrics.balance >= 0 ? "good" : "bad"}"><div class="top"><small>Balance hogar</small><span class="icon">=</span></div><strong>${money(metrics.balance)}</strong><em>Mes activo</em></article>
+    </section>
+    <section class="grid-2">
+      <article class="section-card"><h4>Resumen por persona</h4><p class="sub">Ingresos, gastos personales, parte común y ahorro estimado.</p>${renderMemberContributions(items)}</article>
+      <article class="section-card"><h4>Gastos comunes del mes</h4><p class="sub">Gastos marcados como compartidos.</p>${renderCommonExpenses(items)}</article>
+    </section>
+    <article class="section-card"><h4>Lectura rápida</h4>${renderHouseholdInsights(items)}</article>`;
+}
+
+function renderHouseholdMini() {
+  const items = getVisibleMovements().filter(x => isSameMonth(x.date));
+  const shared = sum(items.filter(x => x.type === "expense" && x.is_shared), x => x.amount);
+  return `<h4>Casa común</h4><p class="sub">Resumen del mes activo.</p><div class="mini-list"><div><span>Gastos compartidos</span><strong>${money(shared)}</strong></div><div><span>Integrantes</span><strong>${state.members.length}</strong></div></div>`;
+}
+
+function renderMemberContributions(items) {
+  const members = state.members.length ? state.members : [{ user_id: state.user.id }];
+  const sharedExpense = sum(items.filter(x => x.type === "expense" && x.is_shared), x => x.amount);
+  const activeCount = Math.max(1, members.length);
+  const equalShare = sharedExpense / activeCount;
+  return `<div class="advice-list">${members.map(m => {
+    const userId = m.user_id;
+    const income = sum(items.filter(x => x.type === "income" && (x.member_id === userId || x.user_id === userId)), x => x.amount);
+    const personalExpense = sum(items.filter(x => x.type === "expense" && !x.is_shared && (x.member_id === userId || x.user_id === userId)), x => x.amount);
+    const balance = income - personalExpense - equalShare;
+    return `<article class="advice ${balance >= 0 ? "ok" : "danger"}"><span class="badge">${balance >= 0 ? "✓" : "!"}</span><div><b>${escapeHtml(memberName(userId))}</b><p>Ingresos: ${money(income)} · Gastos propios: ${money(personalExpense)} · Parte común estimada: ${money(equalShare)} · Disponible: <strong>${money(balance)}</strong></p></div></article>`;
+  }).join("")}</div>`;
+}
+
+function renderCommonExpenses(items) {
+  const common = items.filter(x => x.type === "expense" && x.is_shared);
+  if (!common.length) return `<div class="empty-state"><strong>Sin gastos comunes</strong>Marca un movimiento como común para que aparezca aquí.</div>`;
+  return `<div class="advice-list">${common.map(x => `<article class="advice"><span class="badge">🏠</span><div><b>${escapeHtml(x.description || categoryName(x.category_id))}</b><p>${escapeHtml(dateOnly(x.date))} · ${escapeHtml(categoryName(x.category_id))} · ${money(x.amount)}</p></div></article>`).join("")}</div>`;
+}
+
+function renderHouseholdInsights(items) {
+  const metrics = metricsFor(items);
+  const warnings = [];
+  if (!metrics.totalIncome) warnings.push(["Carga ingresos", "Sin ingresos registrados no hay lectura real del hogar."]);
+  if (!metrics.sharedExpense) warnings.push(["Marca gastos comunes", "Alquiler, comida, luz, agua, gas e internet deberían marcarse como compartidos."]);
+  if (metrics.balance < 0) warnings.push(["Alerta de caja", "El mes activo está en negativo. Revisa gastos grandes y recurrentes."]);
+  if (!warnings.length) warnings.push(["Buen punto de control", "El hogar ya tiene datos suficientes para tomar decisiones."]);
+  return `<div class="advice-list">${warnings.map(([title, text]) => `<article class="advice"><span class="badge">💡</span><div><b>${title}</b><p>${text}</p></div></article>`).join("")}</div>`;
+}
+
+function renderCategories() {
+  return `<section class="page-head"><h2>Categorías</h2><p>Organiza ingresos y gastos para que los reportes sean útiles.</p></section><section class="grid-main"><article class="section-card"><h4>Nueva categoría</h4><form id="categoryForm"><div class="field"><label>Nombre</label><input name="name" required placeholder="Ej. Comida" /></div><div class="inline-grid"><div class="field"><label>Tipo</label><select name="type"><option value="expense">Gasto</option><option value="income">Ingreso</option><option value="both">Ambos</option></select></div><div class="field"><label>Color</label><input name="color" type="color" value="#1677ff" /></div></div><button class="btn primary" type="submit">Crear categoría</button></form></article><article class="section-card"><h4>Categorías guardadas</h4>${state.categories.length ? `<div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Tipo</th><th>Color</th><th>Acciones</th></tr></thead><tbody>${state.categories.map(c => `<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.type)}</td><td><span class="tag" style="background:${escapeHtml(c.color || "#1677ff")};color:white">${escapeHtml(c.color || "")}</span></td><td><button class="btn small danger" data-delete-category="${c.id}">Borrar</button></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>Sin categorías</strong>Crea tus primeras categorías.</div>`}</article></section>`;
+}
+
+function renderGoals() {
+  return `<section class="page-head"><h2>Metas</h2><p>Metas personales o del hogar, según permisos.</p></section><section class="grid-main"><article class="section-card"><h4>Nueva meta</h4><form id="goalForm"><div class="field"><label>Nombre</label><input name="name" required placeholder="Ej. Entrada hipoteca" /></div><div class="inline-grid"><div class="field"><label>Objetivo</label><input name="target_amount" type="number" step="0.01" required /></div><div class="field"><label>Actual</label><input name="current_amount" type="number" step="0.01" value="0" /></div></div><div class="field"><label>Fecha límite</label><input name="deadline" type="date" /></div><button class="btn primary" type="submit">Guardar meta</button></form></article><article class="section-card dark-panel"><h4>Metas activas</h4><div class="form-grid">${state.goals.length ? state.goals.map(g => { const pct = g.target_amount ? Math.min(100, Math.round((Number(g.current_amount || 0) / Number(g.target_amount)) * 100)) : 0; return `<div class="progress-row"><div class="progress-meta"><strong>${escapeHtml(g.name)}</strong><span>${pct}%</span></div><div class="bar"><span style="width:${pct}%"></span></div><div class="progress-meta"><span>${money(g.current_amount)} / ${money(g.target_amount)}</span><button class="btn small danger" data-delete-goal="${g.id}">Borrar</button></div></div>`; }).join("") : `<div class="empty-state"><strong>Sin metas</strong>Agrega una meta para hacer seguimiento.</div>`}</div></article></section>`;
+}
+
+function vehicleTypeIcon(type) {
+  return type === "motorcycle" ? "🏍️" : type === "van" ? "🚐" : type === "truck" ? "🚚" : type === "other" ? "⚙️" : "🚘";
+}
+function vehicleTypeLabel(type) {
+  return { car: "Coche", motorcycle: "Moto", van: "Furgoneta", truck: "Camión", other: "Otro" }[type] || "Vehículo";
+}
+function vehicleRecordTypeLabel(type) {
+  return { insurance: "Seguro", maintenance: "Mantenimiento", oil: "Aceite", tires: "Neumáticos", itv: "ITV", repair: "Reparación", fuel: "Combustible", tax: "Impuesto", other: "Otro" }[type] || type;
+}
+function vehicleTotalSpent(vehicleId = null, year = activeYear()) {
+  return sum(state.vehicleRecords.filter(r => (!vehicleId || r.vehicle_id === vehicleId) && isSameYear(r.date, year) && r.status !== "cancelado"), r => r.amount);
+}
+function vehicleRecordsFor(vehicleId) {
+  return state.vehicleRecords.filter(r => r.vehicle_id === vehicleId).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+}
+function vehicleNextAlerts(limit = 8) {
+  const today = new Date(todayISO());
+  const addDays = (d, n) => new Date(d.getTime() + n * 86400000);
+  const max = addDays(today, 90);
+  return state.vehicleRecords.flatMap(r => {
+    const vehicle = state.vehicles.find(v => v.id === r.vehicle_id);
+    if (!vehicle) return [];
+    const dates = [];
+    if (r.next_date) dates.push({ label: `Próximo ${vehicleRecordTypeLabel(r.type)}`, date: r.next_date });
+    if (r.coverage_end) dates.push({ label: `Vence seguro`, date: r.coverage_end });
+    return dates.filter(x => {
+      const d = new Date(x.date);
+      return !Number.isNaN(d.valueOf()) && d >= today && d <= max;
+    }).map(x => ({ ...x, vehicle, record: r }));
+  }).sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(0, limit);
+}
+
+function renderVehicleMini() {
+  const alerts = vehicleNextAlerts(3);
+  return `<h4>Vehículos</h4><p class="sub">${state.vehicles.length} registrados · ${money(vehicleTotalSpent(null, activeYear()))} en ${activeYear()}</p>${alerts.length ? `<div class="advice-list">${alerts.map(a => `<article class="advice warn"><span>!</span><div><b>${escapeHtml(a.label)}</b><p>${escapeHtml(a.vehicle.name)} · ${escapeHtml(dateOnly(a.date))}</p></div></article>`).join("")}</div>` : `<div class="empty-state"><strong>Sin avisos próximos</strong>Todo tranquilo por ahora.</div>`}`;
+}
+
+function renderVehicles() {
+  const year = activeYear();
+  const alerts = vehicleNextAlerts(20);
+  const filteredRecords = state.vehicleRecords.filter(r => state.filters.vehicle === "all" || r.vehicle_id === state.filters.vehicle);
+  return `
+    <section class="page-head"><h2>Vehículos, seguros y mantenimiento</h2><p>Controla coches y motos: seguros anuales, cuotas, revisiones, aceite, neumáticos, repuestos, reparaciones y próximos avisos.</p></section>
+    <article class="section-card help-card"><strong>🛠️ Flujo recomendado:</strong> primero registra cada vehículo. Después añade seguros, mantenimientos o repuestos. Los importes se suman al año correspondiente y los avisos se calculan con próximas fechas.</article>
+    <section class="metrics-grid vehicle-kpi-grid">
+      <article class="metric"><div class="top"><small>Vehículos</small><span class="icon">🚘</span></div><strong>${state.vehicles.length}</strong><em>Coches, motos u otros</em></article>
+      <article class="metric warn"><div class="top"><small>Gasto anual</small><span class="icon">€</span></div><strong>${money(vehicleTotalSpent(null, year))}</strong><em>Año ${year}</em></article>
+      <article class="metric"><div class="top"><small>Seguros activos</small><span class="icon">🛡️</span></div><strong>${state.vehicleRecords.filter(r => r.type === "insurance" && r.status !== "cancelado" && r.status !== "finalizado").length}</strong><em>Pólizas registradas</em></article>
+      <article class="metric ${alerts.length ? "warn" : "good"}"><div class="top"><small>Avisos próximos</small><span class="icon">🔔</span></div><strong>${alerts.length}</strong><em>90 días</em></article>
+    </section>
+    <section class="grid-main">
+      <article class="section-card"><h4>Nuevo vehículo</h4>${renderVehicleForm()}</article>
+      <article class="section-card"><h4>Vehículos registrados</h4>${renderVehicleList()}</article>
+    </section>
+    <section class="grid-main">
+      <article class="section-card"><h4>Seguro anual / financiado</h4>${renderInsuranceForm()}</article>
+      <article class="section-card"><h4>Mantenimiento, revisión o repuesto</h4>${renderVehicleRecordForm()}</article>
+    </section>
+    <section class="grid-main">
+      <article class="section-card"><h4>Historial de vehículos</h4><div class="field"><label>Filtrar vehículo</label><select id="vehicleFilter"><option value="all">Todos</option>${state.vehicles.map(v => `<option value="${v.id}" ${state.filters.vehicle === v.id ? "selected" : ""}>${escapeHtml(v.name)}</option>`).join("")}</select></div>${renderVehicleRecordsTable(filteredRecords)}</article>
+      <article class="section-card"><h4>Alertas y próximos avisos</h4>${alerts.length ? `<div class="advice-list">${alerts.map(a => `<article class="advice warn"><span class="badge">🔔</span><div><b>${escapeHtml(a.label)}</b><p>${escapeHtml(a.vehicle.name)} · ${escapeHtml(dateOnly(a.date))}</p></div></article>`).join("")}</div>` : `<div class="empty-state"><strong>Sin avisos urgentes</strong>Cuando una revisión, ITV, seguro o próximo kilometraje esté cerca, aparecerá aquí.</div>`}</article>
+    </section>`;
+}
+
+function renderVehicleForm() {
+  return `<form id="vehicleForm">
+    <div class="field"><label>Nombre o alias</label><input name="name" required placeholder="Ej. Peugeot 308, Corolla, Burgman" /></div>
+    <div class="inline-grid"><div class="field"><label>Tipo</label><select name="type"><option value="car">Coche</option><option value="motorcycle">Moto</option><option value="van">Furgoneta</option><option value="truck">Camión</option><option value="other">Otro</option></select></div><div class="field"><label>Responsable / propietario</label><select name="owner_id">${memberOptions(state.user.id)}</select></div></div>
+    <div class="inline-grid"><div class="field"><label>Marca</label><input name="brand" placeholder="Ej. Peugeot, Toyota, Benelli" /></div><div class="field"><label>Modelo</label><input name="model" placeholder="Ej. 308, Corolla, Leoncino" /></div></div>
+    <div class="inline-grid"><div class="field"><label>Matrícula</label><input name="plate" placeholder="Ej. 3979 JBC" /></div><div class="field"><label>Año</label><input name="year" type="number" min="1950" max="2100" placeholder="Ej. 2014" /></div></div>
+    <div class="inline-grid"><div class="field"><label>Kilometraje actual</label><input name="km" type="number" min="0" placeholder="Ej. 120000" /></div><div class="field"><label>Estado</label><select name="status"><option value="activo">Activo</option><option value="vendido">Vendido</option><option value="taller">En taller</option><option value="inactivo">Inactivo</option></select></div></div>
+    <div class="field"><label>Notas</label><textarea name="notes" placeholder="Seguro, uso, observaciones, taller habitual..."></textarea></div>
+    <button class="btn primary" type="submit">Guardar vehículo</button>
+  </form>`;
+}
+
+function renderVehicleList() {
+  if (!state.vehicles.length) return `<div class="empty-state"><strong>No tienes vehículos registrados.</strong>Añade tu coche, moto o cualquier vehículo para comenzar.</div>`;
+  return `<div class="vehicle-list">${state.vehicles.map(v => {
+    const spent = vehicleTotalSpent(v.id, activeYear());
+    const records = vehicleRecordsFor(v.id);
+    const next = vehicleNextAlerts(50).find(a => a.vehicle.id === v.id);
+    return `<article class="vehicle-card"><header><div><h5>${vehicleTypeIcon(v.type)} ${escapeHtml(v.name)}</h5><p class="muted">${escapeHtml([v.brand, v.model, v.year, v.plate].filter(Boolean).join(" · ") || "Sin datos técnicos")}</p></div><span class="vehicle-chip ${v.status === "activo" || !v.status ? "ok" : "warn"}">${escapeHtml(v.status || "activo")}</span></header><div class="vehicle-meta-grid"><div class="mini-stat"><span>Kilómetros</span><strong>${v.km ? Number(v.km).toLocaleString("es-ES") : "-"}</strong></div><div class="mini-stat"><span>Gasto ${activeYear()}</span><strong>${money(spent)}</strong></div><div class="mini-stat"><span>Registros</span><strong>${records.length}</strong></div></div>${next ? `<p class="hint">Próximo aviso: ${escapeHtml(next.label)} · ${escapeHtml(dateOnly(next.date))}</p>` : ""}<div class="td-actions"><button class="btn small danger" data-delete-vehicle="${v.id}">Borrar</button></div></article>`;
+  }).join("")}</div>`;
+}
+
+function renderVehicleSelect(name, required = true) {
+  if (!state.vehicles.length) return `<select name="${name}" ${required ? "required" : ""}><option value="">Primero crea un vehículo</option></select>`;
+  return `<select name="${name}" ${required ? "required" : ""}>${state.vehicles.map(v => `<option value="${v.id}">${escapeHtml(v.name)}</option>`).join("")}</select>`;
+}
+
+function renderInsuranceForm() {
+  return `<form id="vehicleInsuranceForm">
+    <div class="field"><label>Vehículo</label>${renderVehicleSelect("vehicle_id")}</div>
+    <div class="inline-grid"><div class="field"><label>Aseguradora</label><input name="insurance_company" placeholder="Ej. Mapfre, Línea Directa, Mutua..." /></div><div class="field"><label>Total del seguro</label><input name="amount" type="number" step="0.01" min="0" placeholder="Ej. 455" /></div></div>
+    <div class="inline-grid"><div class="field"><label>Forma de pago</label><select name="payment_mode"><option value="cash">Al contado</option><option value="financed">Financiado / cuotas</option><option value="monthly">Mensual</option></select></div><div class="field"><label>Estado</label><select name="status"><option value="activo">Activo</option><option value="pendiente">Pendiente</option><option value="finalizado">Finalizado</option><option value="cancelado">Cancelado</option></select></div></div>
+    <div class="inline-grid"><div class="field"><label>Inicio / primer pago</label><input name="date" type="date" value="${todayISO()}" /></div><div class="field"><label>Fin de cobertura</label><input name="coverage_end" type="date" /></div></div>
+    <div class="inline-grid"><div class="field"><label>Día de pago de cuota</label><input name="installment_day" type="number" min="1" max="31" value="1" /></div><div class="field"><label>Responsable del pago</label><select name="responsible_user_id">${memberOptions(state.user.id)}</select></div></div>
+    <div class="field"><label>Notas</label><textarea name="note" placeholder="Nº de póliza, franquicia, teléfono, observaciones..."></textarea></div>
+    <button class="btn primary" type="submit">Guardar seguro</button>
+  </form>`;
+}
+
+function renderVehicleRecordForm() {
+  return `<form id="vehicleRecordForm">
+    <div class="inline-grid"><div class="field"><label>Vehículo</label>${renderVehicleSelect("vehicle_id")}</div><div class="field"><label>Tipo</label><select name="type"><option value="maintenance">Mantenimiento</option><option value="oil">Cambio de aceite</option><option value="tires">Neumáticos</option><option value="itv">ITV</option><option value="repair">Reparación</option><option value="fuel">Combustible</option><option value="tax">Impuesto</option><option value="other">Otro</option></select></div></div>
+    <div class="field"><label>Concepto</label><input name="concept" placeholder="Ej. Cambio de aceite, 4 cauchos, revisión de frenos" required /></div>
+    <div class="inline-grid"><div class="field"><label>Fecha del gasto / servicio</label><input name="date" type="date" value="${todayISO()}" /></div><div class="field"><label>Importe</label><input name="amount" type="number" step="0.01" min="0" placeholder="0,00" /></div></div>
+    <div class="inline-grid"><div class="field"><label>Kilómetros al hacerlo</label><input name="km" type="number" min="0" placeholder="Ej. 120000" /></div><div class="field"><label>Estado</label><select name="status"><option value="realizado">Realizado / pagado</option><option value="pendiente">Pendiente</option><option value="programado">Programado</option><option value="cancelado">Cancelado</option></select></div></div>
+    <div class="inline-grid"><div class="field"><label>Próxima fecha</label><input name="next_date" type="date" /></div><div class="field"><label>Próximo km</label><input name="next_km" type="number" min="0" placeholder="Ej. 130000" /></div></div>
+    <div class="field"><label>Taller / proveedor</label><input name="provider" placeholder="Ej. Norauto, taller de confianza..." /></div>
+    <div class="field"><label>Notas</label><textarea name="note" placeholder="Marca del aceite, medida de neumáticos, garantía, factura, observaciones..."></textarea></div>
+    <button class="btn primary" type="submit">Guardar mantenimiento</button>
+  </form>`;
+}
+
+function renderVehicleRecordsTable(records) {
+  if (!records.length) return `<div class="empty-state"><strong>Sin historial</strong>Los seguros, mantenimientos y gastos aparecerán aquí.</div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Vehículo</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Próximo aviso</th><th>Acciones</th></tr></thead><tbody>${records.map(r => { const v = state.vehicles.find(x => x.id === r.vehicle_id); return `<tr><td>${escapeHtml(dateOnly(r.date))}</td><td>${escapeHtml(v?.name || "Vehículo")}</td><td>${escapeHtml(vehicleRecordTypeLabel(r.type))}</td><td>${escapeHtml(r.concept || r.insurance_company || r.note || "Registro")}</td><td><strong>${money(r.amount)}</strong></td><td>${escapeHtml(dateOnly(r.next_date || r.coverage_end) || "-")}</td><td><button class="btn small danger" data-delete-vehicle-record="${r.id}">Borrar</button></td></tr>`; }).join("")}</tbody></table></div>`;
+}
+
+function renderReports() {
+  const items = getMovementsFiltered();
+  const metrics = metricsFor(items);
+  const categories = getExpenseCategories(items);
+  const byMember = visibleMembers(true).map(m => {
+    const userId = m.user_id;
+    return { name: memberName(userId), income: sum(items.filter(x => x.type === "income" && (x.member_id === userId || x.user_id === userId)), x => x.amount), expense: sum(items.filter(x => x.type === "expense" && (x.member_id === userId || x.user_id === userId)), x => x.amount) };
+  });
+  return `<section class="page-head"><h2>Reportes</h2><p>Resumen listo para revisar, exportar o imprimir.</p><button class="btn dark" onclick="window.print()">Imprimir</button></section><article class="section-card dark-panel">${renderFilters(`<div></div>`)}</article><section class="metrics-grid"><article class="metric good"><div class="top"><small>Total ingresos</small><span class="icon">↗</span></div><strong>${money(metrics.totalIncome)}</strong><em>Periodo filtrado</em></article><article class="metric bad"><div class="top"><small>Total gastos</small><span class="icon">↘</span></div><strong>${money(metrics.totalExpense)}</strong><em>Periodo filtrado</em></article><article class="metric ${metrics.balance >= 0 ? "good" : "bad"}"><div class="top"><small>Balance</small><span class="icon">=</span></div><strong>${money(metrics.balance)}</strong><em>Resultado</em></article><article class="metric warn"><div class="top"><small>Comunes</small><span class="icon">🏠</span></div><strong>${money(metrics.sharedExpense)}</strong><em>Casa</em></article></section><section class="grid-2"><article class="section-card"><h4>Top categorías</h4>${categories.length ? categories.map(c => `<div class="progress-row"><div class="progress-meta"><span>${escapeHtml(c.name)}</span><strong>${money(c.total)}</strong></div><div class="bar"><span style="width:${metrics.totalExpense ? Math.min(100, c.total / metrics.totalExpense * 100) : 0}%"></span></div></div>`).join("") : `<div class="empty-state"><strong>Sin datos</strong></div>`}</article><article class="section-card"><h4>Por persona</h4><div class="table-wrap"><table><thead><tr><th>Persona</th><th>Ingresos</th><th>Gastos</th><th>Balance</th></tr></thead><tbody>${byMember.map(m => `<tr><td>${escapeHtml(m.name)}</td><td>${money(m.income)}</td><td>${money(m.expense)}</td><td><strong>${money(m.income - m.expense)}</strong></td></tr>`).join("")}</tbody></table></div></article></section><article class="section-card">${renderMovementTable(items, false)}</article>`;
+}
+
+function renderHistory() {
+  const movementEvents = getVisibleMovements().map(m => ({ date: m.date, type: m.type === "income" ? "Ingreso" : "Gasto", title: m.description || categoryName(m.category_id), amount: m.amount, detail: `${memberName(m.member_id || m.user_id)} · ${categoryName(m.category_id)}` }));
+  const vehicleEvents = state.vehicleRecords.map(r => ({ date: r.date, type: "Vehículo", title: r.concept || r.insurance_company || vehicleRecordTypeLabel(r.type), amount: r.amount, detail: state.vehicles.find(v => v.id === r.vehicle_id)?.name || "Vehículo" }));
+  const events = [...movementEvents, ...vehicleEvents].sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 120);
+  return `<section class="page-head"><h2>Historial</h2><p>Línea de tiempo de movimientos, seguros, mantenimientos y registros importantes.</p></section><article class="section-card">${events.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Detalle</th><th>Importe</th></tr></thead><tbody>${events.map(e => `<tr><td>${escapeHtml(dateOnly(e.date))}</td><td>${escapeHtml(e.type)}</td><td>${escapeHtml(e.title)}</td><td>${escapeHtml(e.detail)}</td><td><strong>${money(e.amount)}</strong></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>Sin historial</strong>Cuando cargues datos, aparecerán aquí.</div>`}</article>`;
+}
+
+function renderBackup() {
+  return `<section class="page-head"><h2>Respaldo</h2><p>Exporta tus datos visibles. La fuente real sigue siendo Supabase.</p></section><section class="grid-2"><article class="section-card"><h4>Exportar</h4><p class="sub">Descarga JSON o CSV de lo que tu usuario tiene permiso de ver.</p><div class="form-grid"><button class="btn primary" id="exportJsonBtn">Exportar JSON</button><button class="btn dark" id="exportCsvBtn">Exportar movimientos CSV</button></div></article><article class="section-card dark-panel"><h4>Backup real</h4><p class="sub">Para copias completas usa Supabase Dashboard. Estos botones son respaldos prácticos del usuario.</p></article></section>`;
+}
+
+function renderAdmin() {
+  if (!isAdmin()) return `<div class="empty-state"><strong>Sin permiso</strong>Solo el administrador puede entrar aquí.</div>`;
+  return `<section class="page-head"><h2>Administrador</h2><p>Invita integrantes y define qué puede ver o tocar cada usuario.</p></section><section class="admin-stack"><article class="section-card admin-invite-card"><h4>Invitar integrante</h4><form id="inviteForm"><div class="field"><label>Email</label><input name="email" type="email" required placeholder="correo@dominio.com" /></div><div class="field"><label>Nombre opcional</label><input name="full_name" placeholder="Ej. Mercedes" /></div><div class="field"><label>Rol</label><select name="role"><option value="member">Miembro</option><option value="viewer">Solo lectura</option><option value="admin">Administrador</option></select></div><button class="btn primary" type="submit">Crear invitación</button></form><h4 style="margin-top:20px">Invitaciones</h4>${state.invitations.length ? `<div class="form-grid">${state.invitations.map(i => `<div class="progress-row"><div class="progress-meta"><strong>${escapeHtml(i.invited_email)}</strong><span>${escapeHtml(i.status)} · ${escapeHtml(i.role)}</span></div></div>`).join("")}</div>` : `<div class="empty-state"><strong>Sin invitaciones</strong>Invita a alguien por email.</div>`}</article><article class="section-card admin-members-card"><h4>Miembros</h4>${renderMembersAdmin()}</article></section><article class="section-card admin-permissions-card"><h4>Permisos por usuario</h4><div class="field"><label>Seleccionar usuario</label><select id="permissionUserSelect">${visibleMembers(true).map(m => `<option value="${m.user_id}">${escapeHtml(memberName(m.user_id))} · ${escapeHtml(m.role)}</option>`).join("")}</select></div><div id="permissionsEditor" style="margin-top:14px"></div></article>`;
+}
+
+function renderMembersAdmin() {
+  if (!state.members.length) return `<div class="empty-state"><strong>Sin miembros</strong></div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Ingreso</th><th>%</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${visibleMembers(true).map(m => {
+    const p = state.profilesByUserId[m.user_id] || {};
+    const isMe = m.user_id === state.user?.id;
+    return `<tr>
+      <td><strong>${escapeHtml(memberName(m.user_id))}</strong>${m.dependent ? `<br><span class="hint">Dependiente</span>` : ""}</td>
+      <td>${escapeHtml(p.email || "")}</td>
+      <td><span class="tag neutral">${escapeHtml(m.role)}</span></td>
+      <td><strong>${money(m.monthly_income || 0)}</strong>${m.pay_day ? `<br><span class="hint">Día ${escapeHtml(m.pay_day)}</span>` : ""}</td>
+      <td>${m.participation_percent != null ? `${escapeHtml(m.participation_percent)}%` : "-"}</td>
+      <td>${escapeHtml(m.status || "active")}</td>
+      <td><div class="td-actions">
+        <button class="btn small" data-edit-member="${m.user_id}">Editar</button>
+        ${isAdmin() && !isMe ? `<button class="btn small danger" data-deactivate-member="${m.user_id}">Desactivar</button>` : ""}
+      </div></td>
+    </tr>`;
+  }).join("")}</tbody></table></div>`;
+}
+
+function renderPermissionEditor(userId) {
+  const member = state.members.find(m => m.user_id === userId);
+  const disabled = member?.role === "admin";
+  const safeUserId = String(userId || "user").replace(/[^a-zA-Z0-9_-]/g, "-");
+  const permissionLabels = {
+    can_view: "Ver",
+    can_create: "Crear",
+    can_edit: "Editar",
+    can_delete: "Borrar"
+  };
+
+  const rows = MODULES.map((mod, index) => {
+    const p = state.permissions.find(x => x.user_id === userId && x.module === mod.key) || {};
+    const activeCount = PERMISSION_FIELDS.filter(field => Boolean(p[field])).length;
+    const controls = PERMISSION_FIELDS.map(field => {
+      const inputId = `perm-${safeUserId}-${mod.key}-${field}`;
+      return `<label class="permission-control" for="${inputId}">
+        <span class="permission-control-label">${permissionLabels[field] || field}</span>
+        <span class="permission-switch">
+          <input id="${inputId}" type="checkbox" data-permission-field="${field}" ${p[field] ? "checked" : ""} ${disabled ? "disabled" : ""} />
+          <span class="permission-switch-track" aria-hidden="true"></span>
+        </span>
+      </label>`;
+    }).join("");
+
+    return `<article class="permission-card" data-permission-module="${mod.key}">
+      <div class="permission-module">
+        <span class="permission-module-icon">${mod.icon}</span>
+        <div>
+          <strong>${escapeHtml(mod.label)}</strong>
+          <small>${disabled ? "Admin: acceso total" : `${activeCount}/4 permisos activos`}</small>
+        </div>
+      </div>
+      <div class="permission-actions" aria-label="Permisos de ${escapeHtml(mod.label)}">${controls}</div>
+    </article>`;
+  }).join("");
+
+  const container = $("#permissionsEditor");
+  if (!container) return;
+
+  container.innerHTML = `<div class="permission-editor-panel">
+    <header class="permission-editor-head">
+      <div>
+        <span class="permission-kicker">Permisos del usuario</span>
+        <h5>${escapeHtml(memberName(userId))}</h5>
+        <p>${disabled ? "Este usuario es administrador; por seguridad tiene todo activo por defecto." : "Activa solo lo necesario para cada módulo de la app."}</p>
+      </div>
+      <span class="permission-role-pill ${disabled ? "is-admin" : ""}">${escapeHtml(member?.role || "member")}</span>
+    </header>
+    <div class="permission-list">${rows}</div>
+    <footer class="permission-savebar">
+      <span>${disabled ? "Los permisos de admin no se editan desde aquí." : "Guarda los cambios para aplicar esta matriz de permisos."}</span>
+      <button class="btn primary" id="savePermissionsBtn" data-user-id="${userId}" ${disabled ? "disabled" : ""}>Guardar permisos</button>
+    </footer>
+  </div>`;
+
+  container.querySelector("#savePermissionsBtn")?.addEventListener("click", handleSavePermissions);
+}
+
+function bindCommonActions() {
+  $$('[data-section]').forEach(btn => btn.addEventListener("click", () => { state.activeSection = btn.dataset.section; renderApp(); }));
+  $("#logoutBtn")?.addEventListener("click", () => supabase.auth.signOut());
+  $("#refreshBtn")?.addEventListener("click", async () => { await loadWorkspace(); renderApp(); showToast("Datos actualizados desde Supabase.", "ok"); });
+  $("#householdSwitcher")?.addEventListener("change", async (e) => { state.currentHouseholdId = e.target.value; await loadHouseholdData(); renderApp(); });
+  $("#filterMonth")?.addEventListener("change", e => { state.filters.month = e.target.value; renderApp(); });
+  $("#filterPerson")?.addEventListener("change", e => { state.filters.person = e.target.value; renderApp(); });
+  $("#filterType")?.addEventListener("change", e => { state.filters.movementType = e.target.value; renderApp(); });
+  $("#filterCategory")?.addEventListener("change", e => { state.filters.category = e.target.value || "all"; renderApp(); });
+  $("#filterSearch")?.addEventListener("input", e => { state.filters.search = e.target.value || ""; renderApp(); });
+  $("#analyticsPeriod")?.addEventListener("change", e => { state.analytics.periodMonths = Number(e.target.value || 12); renderApp(); });
+  $("#analyticsCompare")?.addEventListener("change", e => { state.analytics.compare = e.target.value || 'prevMonth'; renderApp(); });
+  $("#analyticsCategory")?.addEventListener("change", e => { state.analytics.category = e.target.value || 'all'; renderApp(); });
+  $("#topCategoriesLimit")?.addEventListener("change", e => { state.analytics.top = Number(e.target.value || 7); renderApp(); });
+  $("#vehicleFilter")?.addEventListener("change", e => { state.filters.vehicle = e.target.value; renderApp(); });
+  $$('[data-accept-invite]').forEach(btn => btn.addEventListener("click", () => acceptInvitation(btn.dataset.acceptInvite)));
+}
+
+function bindSectionActions() {
+  $("#movementForm")?.addEventListener("submit", handleMovementSubmit);
+  $("#recurringForm")?.addEventListener("submit", handleRecurringSubmit);
+  $("#categoryForm")?.addEventListener("submit", handleCategorySubmit);
+  $("#goalForm")?.addEventListener("submit", handleGoalSubmit);
+  $("#vehicleForm")?.addEventListener("submit", handleVehicleSubmit);
+  $("#vehicleInsuranceForm")?.addEventListener("submit", handleVehicleInsuranceSubmit);
+  $("#vehicleRecordForm")?.addEventListener("submit", handleVehicleRecordSubmit);
+  $("#inviteForm")?.addEventListener("submit", handleInviteSubmit);
+  $("#exportJsonBtn")?.addEventListener("click", exportJson);
+  $("#exportCsvBtn")?.addEventListener("click", exportCsv);
+
+  $$('[data-delete-movement]').forEach(btn => btn.addEventListener("click", () => deleteMovement(btn.dataset.deleteMovement)));
+  $$('[data-edit-movement]').forEach(btn => btn.addEventListener("click", () => editMovement(btn.dataset.editMovement)));
+  $$('[data-delete-category]').forEach(btn => btn.addEventListener("click", () => deleteCategory(btn.dataset.deleteCategory)));
+  $$('[data-delete-goal]').forEach(btn => btn.addEventListener("click", () => deleteGoal(btn.dataset.deleteGoal)));
+  $$('[data-delete-vehicle]').forEach(btn => btn.addEventListener("click", () => deleteVehicle(btn.dataset.deleteVehicle)));
+  $$('[data-delete-vehicle-record]').forEach(btn => btn.addEventListener("click", () => deleteVehicleRecord(btn.dataset.deleteVehicleRecord)));
+
+  const permissionSelect = $("#permissionUserSelect");
+  if (permissionSelect) {
+    renderPermissionEditor(permissionSelect.value);
+    permissionSelect.addEventListener("change", e => renderPermissionEditor(e.target.value));
+  }
+  $("#savePermissionsBtn")?.addEventListener("click", handleSavePermissions);
+}
+
+async function acceptInvitation(invitationId) {
+  const inv = state.pendingInvitations.find(i => i.id === invitationId);
+  if (!inv) return;
+  await withError(supabase.from("household_members").insert({ household_id: inv.household_id, user_id: state.user.id, role: inv.role || "member", status: "active" }), "Entraste al hogar.");
+  await supabase.from("invitations").update({ status: "accepted", accepted_at: new Date().toISOString() }).eq("id", inv.id);
+  state.currentHouseholdId = inv.household_id;
+  await loadWorkspace();
+  render();
+}
+
+async function handleMovementSubmit(event) {
+  event.preventDefault();
+  const f = new FormData(event.currentTarget);
+  const type = f.get("type");
+  if (!can("movements", "create") && !can("register", "create")) return showToast("No tienes permiso para crear movimientos.", "danger");
+  const payload = { household_id: state.currentHouseholdId, user_id: state.user.id, member_id: String(f.get("member_id") || state.user.id), type, amount: parseAmount(f.get("amount")), date: f.get("date"), category_id: f.get("category_id") || null, description: String(f.get("description") || "").trim(), is_shared: Boolean(f.get("is_shared")) };
+  await withError(supabase.from("movements").insert(payload), "Movimiento guardado en la BBDD.");
+  await loadHouseholdData(); renderApp();
+}
+
+async function handleRecurringSubmit(event) {
+  event.preventDefault();
+  if (!can("recurring", "create") && !can("register", "create")) return showToast("No tienes permiso para crear recurrentes.", "danger");
+  const f = new FormData(event.currentTarget);
+  const payload = { household_id: state.currentHouseholdId, user_id: state.user.id, member_id: String(f.get("member_id") || state.user.id), type: f.get("type"), amount: parseAmount(f.get("amount")), category_id: f.get("category_id") || null, description: String(f.get("description") || "").trim(), day_of_month: Number(f.get("day_of_month") || 1), frequency: "monthly", active: true, is_shared: Boolean(f.get("is_shared")) };
+  await withError(supabase.from("recurring_movements").insert(payload), "Recurrente guardado.");
+  await loadHouseholdData(); renderApp();
+}
+
+async function handleCategorySubmit(event) {
+  event.preventDefault();
+  if (!can("categories", "create")) return showToast("No tienes permiso para crear categorías.", "danger");
+  const f = new FormData(event.currentTarget);
+  await withError(supabase.from("categories").insert({ household_id: state.currentHouseholdId, name: String(f.get("name") || "").trim(), type: f.get("type"), color: f.get("color") }), "Categoría creada.");
+  await loadHouseholdData(); renderApp();
+}
+
+async function handleGoalSubmit(event) {
+  event.preventDefault();
+  if (!can("goals", "create")) return showToast("No tienes permiso para crear metas.", "danger");
+  const f = new FormData(event.currentTarget);
+  await withError(supabase.from("goals").insert({ household_id: state.currentHouseholdId, user_id: state.user.id, name: String(f.get("name") || "").trim(), target_amount: parseAmount(f.get("target_amount")), current_amount: parseAmount(f.get("current_amount")), deadline: f.get("deadline") || null }), "Meta guardada.");
+  await loadHouseholdData(); renderApp();
+}
+
+async function handleVehicleSubmit(event) {
+  event.preventDefault();
+  if (!can("vehicles", "create")) return showToast("No tienes permiso para crear vehículos.", "danger");
+  const f = new FormData(event.currentTarget);
+  const payload = { household_id: state.currentHouseholdId, owner_id: String(f.get("owner_id") || state.user.id), name: String(f.get("name") || "").trim(), plate: String(f.get("plate") || "").trim(), type: f.get("type"), brand: String(f.get("brand") || "").trim(), model: String(f.get("model") || "").trim(), year: f.get("year") ? Number(f.get("year")) : null, km: f.get("km") ? Number(f.get("km")) : null, status: f.get("status") || "activo", notes: String(f.get("notes") || "").trim() };
+  await withError(supabase.from("vehicles").insert(payload), "Vehículo guardado.");
+  await loadHouseholdData(); renderApp();
+}
+
+async function handleVehicleInsuranceSubmit(event) {
+  event.preventDefault();
+  if (!can("vehicles", "create")) return showToast("No tienes permiso para crear seguros.", "danger");
+  const f = new FormData(event.currentTarget);
+  const payload = { household_id: state.currentHouseholdId, vehicle_id: f.get("vehicle_id"), user_id: state.user.id, type: "insurance", amount: parseAmount(f.get("amount")), date: f.get("date") || todayISO(), note: String(f.get("note") || "").trim(), concept: "Seguro anual", insurance_company: String(f.get("insurance_company") || "").trim(), payment_mode: f.get("payment_mode"), status: f.get("status") || "activo", coverage_end: f.get("coverage_end") || null, installment_day: f.get("installment_day") ? Number(f.get("installment_day")) : null, responsible_user_id: f.get("responsible_user_id") || state.user.id };
+  await withError(supabase.from("vehicle_records").insert(payload), "Seguro guardado.");
+  await loadHouseholdData(); renderApp();
+}
+
+async function handleVehicleRecordSubmit(event) {
+  event.preventDefault();
+  if (!can("vehicles", "create")) return showToast("No tienes permiso para crear mantenimientos.", "danger");
+  const f = new FormData(event.currentTarget);
+  const payload = { household_id: state.currentHouseholdId, vehicle_id: f.get("vehicle_id"), user_id: state.user.id, type: f.get("type"), amount: parseAmount(f.get("amount")), date: f.get("date") || todayISO(), note: String(f.get("note") || "").trim(), concept: String(f.get("concept") || "").trim(), status: f.get("status") || "realizado", km: f.get("km") ? Number(f.get("km")) : null, next_date: f.get("next_date") || null, next_km: f.get("next_km") ? Number(f.get("next_km")) : null, provider: String(f.get("provider") || "").trim() };
+  await withError(supabase.from("vehicle_records").insert(payload), "Mantenimiento guardado.");
+  await loadHouseholdData(); renderApp();
+}
+
+async function handleInviteSubmit(event) {
+  event.preventDefault();
+  if (!isAdmin()) return showToast("Solo el admin puede invitar.", "danger");
+  const f = new FormData(event.currentTarget);
+  await withError(supabase.from("invitations").insert({ household_id: state.currentHouseholdId, invited_email: String(f.get("email") || "").trim().toLowerCase(), full_name: String(f.get("full_name") || "").trim(), role: f.get("role"), invited_by: state.user.id, status: "pending" }), "Invitación creada. Esa persona debe registrarse con ese email.");
+  await loadHouseholdData(); renderApp();
+}
+
+async function handleSavePermissions(event) {
+  const userId = event.currentTarget.dataset.userId;
+  const rows = $$('[data-permission-module]');
+  const payload = rows.map(row => {
+    const record = { household_id: state.currentHouseholdId, user_id: userId, module: row.dataset.permissionModule };
+    PERMISSION_FIELDS.forEach(field => record[field] = row.querySelector(`[data-permission-field="${field}"]`)?.checked || false);
+    return record;
+  });
+  await withError(supabase.from("permissions").upsert(payload, { onConflict: "household_id,user_id,module" }), "Permisos actualizados.");
+  await loadHouseholdData(); renderApp();
+}
+
+async function deleteMovement(id) { if (!confirm("¿Borrar este movimiento?")) return; await withError(supabase.from("movements").delete().eq("id", id), "Movimiento eliminado."); await loadHouseholdData(); renderApp(); }
+async function editMovement(id) { const movement = state.movements.find(m => m.id === id); if (!movement) return; const amount = prompt("Nuevo monto", movement.amount); if (amount === null) return; const description = prompt("Descripción", movement.description || "") ?? movement.description; await withError(supabase.from("movements").update({ amount: parseAmount(amount), description }).eq("id", id), "Movimiento actualizado."); await loadHouseholdData(); renderApp(); }
+async function deleteCategory(id) { if (!confirm("¿Borrar categoría? Los movimientos que la usen quedarán sin categoría.")) return; await withError(supabase.from("categories").delete().eq("id", id), "Categoría eliminada."); await loadHouseholdData(); renderApp(); }
+async function deleteGoal(id) { if (!confirm("¿Borrar meta?")) return; await withError(supabase.from("goals").delete().eq("id", id), "Meta eliminada."); await loadHouseholdData(); renderApp(); }
+async function deleteVehicle(id) { if (!confirm("¿Borrar vehículo? También se borrará su historial.")) return; await withError(supabase.from("vehicles").delete().eq("id", id), "Vehículo eliminado."); await loadHouseholdData(); renderApp(); }
+async function deleteVehicleRecord(id) { if (!confirm("¿Borrar este registro de vehículo?")) return; await withError(supabase.from("vehicle_records").delete().eq("id", id), "Registro eliminado."); await loadHouseholdData(); renderApp(); }
+
+function exportJson() {
+  const data = { exported_at: new Date().toISOString(), household: getCurrentHousehold(), profile: state.profile, members: state.members, categories: state.categories, movements: getMovementsFiltered(), recurring: state.recurring, goals: state.goals, vehicles: state.vehicles, vehicle_records: state.vehicleRecords };
+  downloadTextFile(`finanzas360-respaldo-${todayISO()}.json`, JSON.stringify(data, null, 2));
+}
+function exportCsv() { downloadTextFile(`finanzas360-movimientos-${todayISO()}.csv`, toCSV(getMovementsFiltered()), "text/csv"); }
+
+
+// ─────────────────────────────────────────────────────────────
+// V3 · Espejo de estructura de la app antigua + Supabase real
+// Mantiene login/BBDD/roles, pero devuelve la jerarquía visual y funcional
+// de Finanzas 360 original: dashboard amplio, registrar separado, aportes,
+// vehículos completos, historial, metas y respaldo.
+// ─────────────────────────────────────────────────────────────
+const F360V3 = (() => {
+  const MENU = [
+    { key: "dashboard", label: "1. Inicio", icon: "📊" },
+    { key: "categories", label: "2. Categorías", icon: "🏷️" },
+    { key: "members", label: "3. Hogar", icon: "🏠" },
+    { key: "household", label: "4. Aportes", icon: "👨‍👩‍👧‍👦" },
+    { key: "register", label: "5. Registrar", icon: "🖊️" },
+    { key: "vehicles", label: "6. Vehículos", icon: "🚘" },
+    { key: "movements", label: "7. Movimientos", icon: "📋" },
+    { key: "goals", label: "8. Metas", icon: "🎯" },
+    { key: "history", label: "9. Historial", icon: "🗓️" },
+    { key: "backup", label: "10. Respaldo", icon: "💾" },
+    { key: "admin", label: "Admin", icon: "🛡️" }
+  ];
+
+  const months = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const monthName = (key = activeMonth()) => `${months[Math.max(0, Number(String(key).slice(5,7)) - 1)] || "Mes"} de ${String(key).slice(0,4)}`;
+  const pct = (part, total) => total ? Math.max(0, Math.min(100, Math.round((Number(part || 0) / Number(total || 0)) * 100))) : 0;
+  const signedMoney = (n = 0) => `${Number(n || 0) >= 0 ? "+" : ""}${money(n)}`;
+  const shortDate = (v) => v ? new Date(String(v).slice(0,10) + "T00:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }) : "-";
+  const yearOf = (m = activeMonth()) => String(m).slice(0, 4);
+  const monthNo = (m = activeMonth()) => Number(String(m).slice(5, 7));
+  const currentPersonLabel = () => state.filters.person === "all" ? "Todo el hogar" : state.filters.person === "me" ? "Mi información" : memberName(state.filters.person);
+
+  function visibleModules() {
+    return MENU.filter(m => {
+      if (m.key === "admin") return isAdmin();
+      if (m.key === "members") return isAdmin() || can("admin", "view") || can("household", "view");
+      return m.key === "dashboard" || can(m.key, "view") || isAdmin();
+    });
+  }
+
+  function renderSection() {
+    const section = state.activeSection;
+    if (section === "dashboard") return renderDashboard();
+    if (section === "categories") return renderCategories();
+    if (section === "members") return renderMembersSection();
+    if (section === "household") return renderHousehold();
+    if (section === "register") return renderRegister();
+    if (section === "vehicles") return renderVehicles();
+    if (section === "movements") return renderMovements();
+    if (section === "goals") return renderGoals();
+    if (section === "history") return renderHistory();
+    if (section === "backup") return renderBackup();
+    if (section === "admin") return renderAdmin();
+    return renderDashboard();
+  }
+
+  function renderApp() {
+    app.className = "app app-sidebar app-old-mirror";
+    const currentHousehold = getCurrentHousehold();
+    const modules = visibleModules();
+    app.innerHTML = `
+      <aside class="side-nav old-side" aria-label="Menú principal">
+        <div class="side-brand old-side-brand">
+          <div class="brand-logo">F3</div>
+          <div><h1>Finanzas 360</h1><span>Tu gestor financiero personal</span></div>
+        </div>
+        ${state.households.length > 1 ? `<div class="field side-switch"><label>Hogar activo</label><select id="householdSwitcher">${state.households.map(h => `<option value="${h.id}" ${h.id === state.currentHouseholdId ? "selected" : ""}>${escapeHtml(h.name)}</option>`).join("")}</select></div>` : `<div class="side-household-name">${escapeHtml(currentHousehold?.name || "Familia")}</div>`}
+        <div class="side-divider"></div>
+        <span class="side-menu-title">Menú principal</span>
+        <nav class="nav side-menu old-menu">
+          ${modules.map(m => `<button type="button" class="${state.activeSection === m.key ? "active" : ""}" data-section="${m.key}"><span>${m.icon}</span><b>${m.label}</b></button>`).join("")}
+        </nav>
+        <div class="side-footer">
+          <div class="side-user"><strong>${escapeHtml(state.profile?.full_name || state.user.email)}</strong><span>${escapeHtml(state.currentMember?.role || "usuario")}</span></div>
+          <button class="btn ghost small" id="exportJsonBtn">💾 Exportar datos</button>
+          <button class="btn ok small" id="refreshBtn">Actualizar</button>
+          <button class="btn danger small" id="logoutBtn">Salir</button>
+        </div>
+      </aside>
+      <main class="content-area old-content">
+        ${renderSection()}
+      </main>
+    `;
+    bindCommonActions();
+    bindSectionActions();
+  }
+
+  function periodToolbar() {
+    const y = Number(yearOf());
+    const personOptions = filterPersonOptions();
+    return `
+      <section class="period-toolbar old-period">
+        <div class="section-card quick-period-card">
+          <p class="mini-note">🗓️ <strong>Mes activo:</strong> todos los registros, gráficas y cálculos se refieren al mes que selecciones aquí.</p>
+          <div class="period-grid old-period-grid">
+            <div class="field"><label>Mes activo</label><input id="filterMonth" type="month" value="${escapeHtml(activeMonth())}" /></div>
+            <div class="field"><label>Año activo</label><select id="oldYearSelector">${[y-1,y,y+1].map(v => `<option value="${v}" ${v===y ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+            <div class="field"><label>Vista del dashboard</label><select id="filterPerson">${personOptions}</select></div>
+            <div class="quick-actions">
+              <button class="btn primary" type="button" data-section="register">5A&nbsp;&nbsp;+ Ingreso</button>
+              <button class="btn dark" type="button" data-open-expense>5B&nbsp;&nbsp;+ Gasto</button>
+              <button class="btn ghost" type="button" data-section="register">5C&nbsp;&nbsp;↻ Recurrente</button>
+              <button class="btn ghost" type="button" onclick="window.print()">🖨️ Informe</button>
+            </div>
+          </div>
+        </div>
+        ${monthStrip()}
+      </section>`;
+  }
+
+  function monthStrip() {
+    const y = Number(yearOf());
+    const keys = Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2,"0")}`);
+    return `<div class="section-card month-history-card">
+      <div class="month-card-header"><h4>Meses anteriores</h4><div class="month-card-actions"><span class="hint">Visible por año. Por defecto: año en curso.</span><select class="compact-select" id="monthStripYear"><option>${y} · año en curso</option></select></div></div>
+      <div class="month-strip">${keys.reverse().map(k => { const m = metricsFor(monthItems(k)); return `<button class="month-pill ${k === activeMonth() ? "active" : ""}" type="button" data-set-month="${k}"><strong>${monthName(k)}</strong><span>${money(m.balance)} · ${m.incomes.length + m.expenses.length} mov.</span></button>`; }).join("")}</div>
+    </div>`;
+  }
+
+  function monthItems(month = activeMonth(), person = state.filters.person) {
+    return movementsForMonthPerson(month, person, { respectType: true });
+  }
+
+  function getMonthsRange(count = 12) {
+    const start = new Date(Number(yearOf()), monthNo() - 1, 1);
+    return Array.from({ length: count }, (_, idx) => {
+      const d = new Date(start);
+      d.setMonth(d.getMonth() - (count - 1 - idx));
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+    });
+  }
+
+  function yearlyItems(year = yearOf()) {
+    return getVisibleMovements().filter(x => String(x.date || "").slice(0, 4) === String(year));
+  }
+
+  function oldKpis(items) {
+    const m = metricsFor(items);
+    const categories = getExpenseCategories(items);
+    const top = categories[0];
+    const sharedPart = m.sharedExpense;
+    const prevKeyDate = new Date(Number(yearOf()), monthNo() - 2, 1);
+    const prevKey = `${prevKeyDate.getFullYear()}-${String(prevKeyDate.getMonth()+1).padStart(2,"0")}`;
+    const prevBalance = metricsFor(monthItems(prevKey)).balance;
+    return [
+      { title: `Ingresos de ${escapeHtml(currentPersonLabel())}`, value: money(m.totalIncome), sub: `${m.incomes.length} ingresos en la vista activa`, tone: "good" },
+      { title: `Gastos de ${escapeHtml(currentPersonLabel())}`, value: money(m.totalExpense), sub: `${m.expenses.length} gastos · ${pct(m.totalExpense, m.totalIncome)}% de ingresos`, tone: "bad" },
+      { title: `Balance de ${escapeHtml(currentPersonLabel())}`, value: money(m.balance), sub: `${signedMoney(m.balance - prevBalance)} vs mes anterior`, tone: m.balance >= 0 ? "good" : "bad" },
+      { title: `Gasto asignado a ${escapeHtml(currentPersonLabel())}`, value: money(m.totalExpense), sub: "Gastos propios y parte de compartidos", tone: "warn" },
+      { title: "Ahorro estimado", value: money(Math.max(0, m.balance)), sub: `${pct(Math.max(0,m.balance), m.totalIncome)}% sobre ingresos de la vista`, tone: "good" },
+      { title: "Tu parte compartida", value: money(sharedPart), sub: `${pct(sharedPart, m.totalExpense)}% del gasto mostrado`, tone: "warn" },
+      { title: "Categoría más cara", value: escapeHtml(top?.name || "Sin datos"), sub: top ? money(top.total) : "Registra gastos", tone: "" },
+      { title: "Variación de gastos", value: signedMoney(m.totalExpense), sub: "Comparado con el mes anterior", tone: "bad" }
+    ];
+  }
+
+  function renderKpiGrid(items) {
+    return `<section class="metrics-grid old-kpi-grid">${oldKpis(items).map(k => `<article class="metric old-kpi ${k.tone}"><small>${k.title}</small><strong>${k.value}</strong><em>${k.sub}</em></article>`).join("")}</section>`;
+  }
+
+  function cssBarChart(monthsList, metric = "balance") {
+    const series = monthsList.map(k => { const m = metricsFor(monthItems(k)); return { key:k, income:m.totalIncome, expense:m.totalExpense, balance:m.balance }; });
+    const max = Math.max(1, ...series.map(s => Math.max(s.income, s.expense, Math.abs(s.balance))));
+    return `<div class="chart-bars">${series.map(s => `<div class="chart-month"><div class="bar-stack"><i class="income" style="height:${(s.income/max)*100}%"></i><i class="expense" style="height:${(s.expense/max)*100}%"></i><i class="balance ${s.balance>=0?'pos':'neg'}" style="height:${(Math.abs(s.balance)/max)*100}%"></i></div><span>${String(s.key).slice(5)}</span></div>`).join("")}</div>`;
+  }
+
+  function horizontalBars(categories, total) {
+    if (!categories.length) return `<div class="empty-state"><strong>Sin datos</strong>Registra gastos para ver categorías.</div>`;
+    return `<div class="old-bar-list">${categories.map(c => `<div class="progress-row"><div class="progress-meta"><span>${escapeHtml(c.name)}</span><strong>${money(c.total)}</strong></div><div class="bar"><span style="width:${pct(c.total,total)}%"></span></div></div>`).join("")}</div>`;
+  }
+
+  function analyticsMonthsCount() {
+    return Number(state.analytics?.periodMonths || 12);
+  }
+
+  function analyticsTopCount() {
+    return Number(state.analytics?.top || 7);
+  }
+
+  function analyticsCategoryFilter(items) {
+    const selected = state.analytics?.category || "all";
+    if (selected === "all") return items;
+    return items.filter(x => categoryName(x.category_id) === selected);
+  }
+
+  function analyticsReferenceKey() {
+    if ((state.analytics?.compare || "prevMonth") === "lastYear") {
+      return `${Number(yearOf()) - 1}-${String(monthNo()).padStart(2, "0")}`;
+    }
+    const d = new Date(Number(yearOf()), monthNo() - 2, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  function analyticsReferenceLabel() {
+    const key = analyticsReferenceKey();
+    return (state.analytics?.compare || "prevMonth") === "lastYear"
+      ? `Mismo mes ${yearOf(key)}`
+      : monthName(key);
+  }
+
+  function expenseCategoriesFrom(items, limit = analyticsTopCount()) {
+    return getExpenseCategories(analyticsCategoryFilter(items)).slice(0, limit);
+  }
+
+  function donutChart(categories, total, centerLabel = "Total") {
+    if (!categories.length || total <= 0) {
+      return `<div class="donut-empty"><strong>Sin datos</strong><span>Registra gastos para ver la dona.</span></div>`;
+    }
+    const palette = ["#6c63ff", "#4aa3ff", "#34d399", "#f59e0b", "#fb7185", "#8b5cf6", "#22c55e", "#f97316", "#14b8a6", "#e879f9"];
+    let acc = 0;
+    const stops = categories.map((c, i) => {
+      const portion = Math.max(0, Number(c.total || 0)) / total * 100;
+      const start = acc.toFixed(2);
+      acc += portion;
+      const end = acc.toFixed(2);
+      return `${palette[i % palette.length]} ${start}% ${end}%`;
+    }).join(', ');
+    return `<div class="donut-layout"><div class="donut-ring" style="--donut-bg: conic-gradient(${stops});"><div class="donut-hole"><span>${escapeHtml(centerLabel)}</span><strong>${money(total)}</strong></div></div><div class="donut-legend">${categories.map((c, i) => `<div class="legend-item"><i style="background:${palette[i % palette.length]}"></i><span>${escapeHtml(c.name)}</span><strong>${pct(c.total, total)}%</strong></div>`).join("")}</div></div>`;
+  }
+
+  function dualDonutCompare(activeCats, refCats, activeTotal, refTotal, activeLabel, refLabel) {
+    return `<div class="dual-donut-grid"><div class="mini-donut-card"><h5>${escapeHtml(activeLabel)}</h5>${donutChart(activeCats, activeTotal, 'Mes activo')}</div><div class="mini-donut-card"><h5>${escapeHtml(refLabel)}</h5>${donutChart(refCats, refTotal, 'Referencia')}</div></div>`;
+  }
+
+  function compareKpiCards(currentMetrics, refMetrics, refLabel) {
+    const rows = [
+      ["Ingresos", currentMetrics.totalIncome, refMetrics.totalIncome],
+      ["Gastos", currentMetrics.totalExpense, refMetrics.totalExpense],
+      ["Balance", currentMetrics.balance, refMetrics.balance],
+      ["Ahorro", Math.max(0, currentMetrics.balance), Math.max(0, refMetrics.balance)]
+    ];
+    return `<div class="compare-kpi-grid">${rows.map(([label, current, ref]) => `<div class="compare-kpi"><span>${escapeHtml(label)}</span><strong>${money(current)}</strong><em>${signedMoney(current - ref)} vs ${escapeHtml(refLabel)}</em></div>`).join("")}</div>`;
+  }
+
+  function compareBars(currentMetrics, refMetrics, refLabel) {
+    const rows = [
+      { key: 'Ingresos', current: currentMetrics.totalIncome, ref: refMetrics.totalIncome },
+      { key: 'Gastos', current: currentMetrics.totalExpense, ref: refMetrics.totalExpense },
+      { key: 'Balance', current: Math.abs(currentMetrics.balance), ref: Math.abs(refMetrics.balance) }
+    ];
+    const max = Math.max(1, ...rows.flatMap(r => [r.current, r.ref]));
+    return `<div class="compare-bars-panel">${rows.map(r => `<div class="compare-bar-row"><div class="compare-bar-head"><strong>${r.key}</strong><span>Mes activo vs ${escapeHtml(refLabel)}</span></div><div class="compare-bar-track"><i class="current" style="width:${(r.current / max) * 100}%"></i><i class="reference" style="width:${(r.ref / max) * 100}%"></i></div><div class="compare-bar-values"><span>${money(r.current)}</span><span>${money(r.ref)}</span></div></div>`).join("")}</div>`;
+  }
+
+  function ytdCompareChart(currentMetrics, prevMetrics) {
+    const rows = [
+      { label: 'Ingresos', current: currentMetrics.totalIncome, prev: prevMetrics.totalIncome },
+      { label: 'Gastos', current: currentMetrics.totalExpense, prev: prevMetrics.totalExpense },
+      { label: 'Balance', current: Math.abs(currentMetrics.balance), prev: Math.abs(prevMetrics.balance) },
+      { label: 'Personal', current: Math.max(0, currentMetrics.balance), prev: Math.max(0, prevMetrics.balance) }
+    ];
+    const max = Math.max(1, ...rows.flatMap(r => [r.current, r.prev]));
+    return `<div class="ytd-bars">${rows.map(r => `<div class="ytd-group"><div class="ytd-group-bars"><i class="prev" style="height:${(r.prev / max) * 100}%"></i><i class="current" style="height:${(r.current / max) * 100}%"></i></div><span>${escapeHtml(r.label)}</span></div>`).join("")}</div>`;
+  }
+
+  function categoryCompareTable(currentCats, refCats) {
+    const map = new Map();
+    currentCats.forEach(c => map.set(c.name, { name: c.name, current: c.total, ref: 0 }));
+    refCats.forEach(c => map.set(c.name, { name: c.name, current: map.get(c.name)?.current || 0, ref: c.total }));
+    const rows = [...map.values()].sort((a, b) => (b.current - b.ref) - (a.current - a.ref)).slice(0, analyticsTopCount());
+    if (!rows.length) return `<div class="empty-state"><strong>Sin categorías</strong>No hay datos para comparar.</div>`;
+    return `<div class="category-compare-table"><div class="cat-row cat-head"><span>Categoría</span><span>Mes activo</span><span>Referencia</span><span>Diferencia</span></div>${rows.map(r => `<div class="cat-row"><strong>${escapeHtml(r.name)}</strong><span>${money(r.current)}</span><span>${money(r.ref)}</span><span class="${(r.current - r.ref) >= 0 ? 'up' : 'down'}">${signedMoney(r.current - r.ref)}</span></div>`).join("")}</div>`;
+  }
+
+  function smartTips(items) {
+    const m = metricsFor(items);
+    const cats = getExpenseCategories(items);
+    const over = m.totalExpense > m.totalIncome && m.totalIncome > 0;
+    const budgetCats = cats.filter(c => c.total > 0).slice(0, 4);
+    const tips = [];
+    if (over) tips.push(["!", "Gastos por encima de ingresos", "Este mes gastas más de lo que entra. Revisa ocio, suscripciones, transporte y compras variables antes de tocar gastos esenciales."]);
+    tips.push(["•", "Margen de ahorro muy bajo", `Has usado el ${pct(m.totalExpense, m.totalIncome)}% de los ingresos. Objetivo sano: bajar al 85% y luego al 75%.`]);
+    if (budgetCats[0]) tips.push(["!", "Categoría dominante", `${budgetCats[0].name} pesa ${money(budgetCats[0].total)} este mes. Ahí está el primer sitio para mirar.`]);
+    tips.push(["✓", "Gastos compartidos controlados", "Revisa el reparto por persona cada mes. En hogares compartidos lo justo no siempre es dividir igual: puede ser por ingresos, uso o responsabilidad."]);
+    return tips.map(t => `<div class="advice"><span class="badge">${t[0]}</span><div><b>${escapeHtml(t[1])}</b><p>${escapeHtml(t[2])}</p></div></div>`).join("");
+  }
+
+  function renderDashboard() {
+    const items = monthItems();
+    const m = metricsFor(items);
+    const periodMonths = analyticsMonthsCount();
+    const monthsList = getMonthsRange(periodMonths);
+    const referenceKey = analyticsReferenceKey();
+    const referenceItems = analyticsCategoryFilter(monthItems(referenceKey));
+    const refMetrics = metricsFor(referenceItems);
+    const refLabel = analyticsReferenceLabel();
+    const categories = expenseCategoriesFrom(items);
+    const activeCategories = expenseCategoriesFrom(items);
+    const refCategories = expenseCategoriesFrom(monthItems(referenceKey));
+    const yearItemsList = analyticsCategoryFilter(yearlyItems());
+    const ym = metricsFor(yearItemsList);
+    const prevYearItems = analyticsCategoryFilter(getVisibleMovements().filter(x => String(x.date || '').slice(0,4) === String(activeYear() - 1) && Number(String(x.date || '').slice(5,7) || 0) <= monthNo()));
+    const prevYearMetrics = metricsFor(prevYearItems);
+    const selectedCategoryLabel = state.analytics?.category && state.analytics.category !== 'all' ? ` · ${state.analytics.category}` : '';
+    return `
+      ${periodToolbar()}
+      <section class="section-header old-title-row"><div class="section-icon-row"><div class="section-badge">📊</div><div><h3>Panel principal</h3><p>Resumen ejecutivo del mes activo. De un vistazo ves ingresos, gastos, balance y tendencias.</p></div></div></section>
+      <div class="help-banner"><span class="hb-icon">💡</span><div><strong>¿Primera vez aquí?</strong> Registra ingresos y gastos reales desde <b>Registrar</b>. Todo queda guardado en Supabase y el admin puede filtrar por integrante.</div></div>
+      ${renderKpiGrid(items)}
+      <section class="section-card analytics-toolbar old-analysis">
+        <div class="analytics-toolbar-head">
+          <div class="analytics-title-block">
+            <span class="analytics-pill">Análisis</span>
+            <h4>Panel de análisis dinámico</h4>
+            <p>Ajusta las gráficas por periodo, comparación, dato principal y categorías visibles.</p>
+          </div>
+          <div class="analytics-summary-card">
+            <span>Vista actual</span>
+            <strong>${periodMonths} meses</strong>
+            <em>${escapeHtml(refLabel)}</em>
+          </div>
+        </div>
+        <div class="analytics-controls analytics-controls-pro">
+          <div class="field analytics-field"><label>Periodo</label><select id="analyticsPeriod"><option value="12" ${periodMonths===12?'selected':''}>Últimos 12 meses</option><option value="6" ${periodMonths===6?'selected':''}>Últimos 6 meses</option></select></div>
+          <div class="field analytics-field"><label>Comparar con</label><select id="analyticsCompare"><option value="prevMonth" ${state.analytics.compare==='prevMonth'?'selected':''}>Mes anterior</option><option value="lastYear" ${state.analytics.compare==='lastYear'?'selected':''}>Mismo mes año anterior</option></select></div>
+          <div class="field analytics-field analytics-field-wide"><label>Dato principal</label><select id="filterType"><option value="all" ${state.filters.movementType==='all'?'selected':''}>Ingresos, gastos y balance</option><option value="income" ${state.filters.movementType==='income'?'selected':''}>Solo ingresos</option><option value="expense" ${state.filters.movementType==='expense'?'selected':''}>Solo gastos</option></select></div>
+          <div class="field analytics-field analytics-field-wide"><label>Categoría</label><select id="analyticsCategory"><option value="all" ${state.analytics.category==='all'?'selected':''}>Todas las categorías</option>${state.categories.map(c=>`<option value="${escapeHtml(c.name)}" ${state.analytics.category===c.name?'selected':''}>${escapeHtml(c.name)}</option>`).join("")}</select></div>
+          <div class="field analytics-field analytics-field-small"><label>Mostrar</label><select id="topCategoriesLimit"><option value="7" ${analyticsTopCount()===7?'selected':''}>Top 7</option><option value="5" ${analyticsTopCount()===5?'selected':''}>Top 5</option><option value="10" ${analyticsTopCount()===10?'selected':''}>Top 10</option></select></div>
+        </div>
+      </section>
+      <section class="grid-2 old-dashboard-grid analytics-main-grid">
+        <article class="section-card chart-card-large"><h4>Evolución mensual · ingresos, gastos y balance${escapeHtml(selectedCategoryLabel)}</h4><p class="sub">Datos filtrados por la vista activa.</p>${cssBarChart(monthsList)}<div class="reading-box"><b>Lectura dinámica:</b> En ${monthName(activeMonth())}, ingresos ${money(m.totalIncome)}, gastos ${money(m.totalExpense)} y balance ${money(m.balance)}.</div></article>
+        <div class="analytics-side-stack">
+          <article class="section-card compact-card"><h4>Gastos por categoría</h4><p class="sub">Top de gastos del mes activo.</p>${horizontalBars(categories, Math.max(1, m.totalExpense))}<div class="reading-box"><b>Lectura dinámica:</b> ${categories[0] ? `${categories[0].name} es la partida con más peso: ${money(categories[0].total)}.` : "Aún no hay gastos para analizar."}</div></article>
+          <article class="section-card compact-card"><h4>Distribución de gastos</h4><p class="sub">Vista tipo torta / donut de las categorías del mes activo.</p>${donutChart(activeCategories, activeCategories.reduce((a,c)=>a + Number(c.total || 0),0), 'Total')}<div class="reading-box"><b>Lectura dinámica:</b> ${activeCategories[0] ? `La porción más grande es ${activeCategories[0].name} con ${pct(activeCategories[0].total, activeCategories.reduce((a,c)=>a + Number(c.total || 0),0))}%.` : 'Aún no hay gastos para analizar.'}</div></article>
+        </div>
+      </section>
+      <section class="grid-2 old-dashboard-grid">
+        <article class="section-card"><h4>Indicadores del año</h4><div class="indicator-grid"><div><span>Ingresos anuales</span><strong>${money(ym.totalIncome)}</strong></div><div><span>Gastos anuales</span><strong>${money(ym.totalExpense)}</strong></div><div><span>Balance anual</span><strong>${money(ym.balance)}</strong></div><div><span>Promedio gasto/mes</span><strong>${money(ym.totalExpense / Math.max(1, monthNo()))}</strong></div><div><span>Mejor mes</span><strong>${monthName(activeMonth())}</strong></div><div><span>Meses con datos</span><strong>${new Set(yearItemsList.map(x=>String(x.date).slice(0,7))).size}/12</strong></div></div></article>
+        <article class="section-card"><h4>Consejos financieros orientativos</h4><p class="sub">Reglas simples basadas en tus movimientos.</p><div class="advice-list">${smartTips(items)}</div></article>
+      </section>
+      <section class="grid-2 old-dashboard-grid analytics-compare-grid">
+        <article class="section-card"><h4>Comparador ejecutivo</h4><p class="sub">Cruza el mes activo contra ${escapeHtml(refLabel.toLowerCase())} y resume la variación real.</p>${compareKpiCards(m, refMetrics, refLabel)}${compareBars(m, refMetrics, refLabel)}<div class="reading-box"><b>Lectura dinámica:</b> ${refLabel}: ingresos ${money(refMetrics.totalIncome)}, gastos ${money(refMetrics.totalExpense)} y balance ${money(refMetrics.balance)}.</div></article>
+        <article class="section-card"><h4>Distribución · mes activo vs referencia</h4><p class="sub">Comparación de donas para ver cómo cambia el peso de tus categorías.</p>${dualDonutCompare(activeCategories, refCategories, activeCategories.reduce((a,c)=>a + Number(c.total || 0),0), refCategories.reduce((a,c)=>a + Number(c.total || 0),0), monthName(activeMonth()), refLabel)}<div class="reading-box"><b>Lectura dinámica:</b> Compara visualmente cómo se reparte el gasto entre el mes activo y la referencia.</div></article>
+      </section>
+      <section class="grid-2 old-dashboard-grid analytics-compare-grid">
+        <article class="section-card"><h4>Año acumulado vs año anterior</h4><p class="sub">Compara el acumulado del año hasta el mes activo con el mismo tramo del año pasado.</p>${ytdCompareChart(ym, prevYearMetrics)}<div class="reading-box"><b>Lectura dinámica:</b> Acumulado ${activeYear()}: ingresos ${money(ym.totalIncome)}, gastos ${money(ym.totalExpense)} y balance ${money(ym.balance)}. Año anterior: ${money(prevYearMetrics.balance)} de balance.</div></article>
+        <article class="section-card"><h4>Categorías: mes activo vs referencia</h4><p class="sub">Detecta qué partidas suben o bajan contra el periodo de comparación.</p>${categoryCompareTable(activeCategories, refCategories)}</article>
+      </section>
+      <section class="grid-2 old-dashboard-grid">
+        <article class="section-card"><h4>Resumen inteligente: cómo vas y qué hacer ahora</h4><div class="coach-summary-grid"><div class="coach-kpi"><span>Salud financiera</span><strong>${Math.max(0, Math.min(100, 100 - pct(m.totalExpense, m.totalIncome)))}/100</strong><em>Según ingresos y gastos.</em></div><div class="coach-kpi"><span>Ahorro real</span><strong>${money(Math.max(0,m.balance))}</strong><em>${pct(Math.max(0,m.balance), m.totalIncome)}% de ingresos.</em></div><div class="coach-kpi"><span>Posible recorte</span><strong>${money(categories.slice(0,3).reduce((a,c)=>a+c.total*0.1,0))}</strong><em>Estimación conservadora.</em></div></div><div class="priority-list">${categories.slice(0,4).map((c,i)=>`<div class="priority-row"><span class="priority-rank ${i===0?'cut':i===1?'optimize':'essential'}">${i+1}</span><div><b>${escapeHtml(i===0?'Revisar primero':'Mantener bajo control')}</b><p>${escapeHtml(c.name)} suma ${money(c.total)} este mes.</p></div><strong>${money(c.total)}</strong></div>`).join("") || `<div class="empty-state"><strong>Sin análisis</strong>Carga movimientos para generar prioridades.</div>`}</div></article>
+        <article class="section-card"><h4>Plan de acción recomendado</h4><div class="action-plan-list"><div class="action-step"><span class="step-number">1</span><div><b>Cierra la foto del mes</b><p>Confirma ingresos recurrentes, deudas, comida, servicios y suscripciones.</p></div></div><div class="action-step"><span class="step-number">2</span><div><b>Recorta por arriba</b><p>Empieza por la categoría más cara sin tocar gastos indispensables.</p></div></div><div class="action-step"><span class="step-number">3</span><div><b>Revisa gastos compartidos</b><p>Valida que el reparto del hogar sea justo para todos.</p></div></div></div></article>
+      </section>`;
+  }
+
+  function renderRegister() {
+    return `
+      <section class="section-header"><div class="section-icon-row"><div class="section-badge">🖊️</div><div><h3>Registrar movimientos</h3><p>Primero eliges qué necesitas registrar; la app muestra el formulario correcto para evitar duplicados y errores.</p></div></div></section>
+      <div class="help-banner"><span class="hb-icon">ℹ️</span><div><strong>La lógica queda separada por dentro, pero ordenada por fuera.</strong> Usa movimientos puntuales para pagos únicos y recurrentes para nóminas, servicios variables, deudas o cuotas.</div></div>
+      <article class="section-card register-flow-card"><h4>¿Qué quieres registrar?</h4><div class="register-choice-grid" id="registerFlowChoices"><button class="register-choice-btn active" data-flow-target="incomePanel" type="button"><b>➕ Ingreso puntual</b><span>Nómina cobrada una vez, factura, venta, freelance o dinero que entra este mes.</span></button><button class="register-choice-btn" data-flow-target="expensePanel" type="button"><b>➖ Gasto puntual</b><span>Compra, factura pagada, comida, transporte o gasto único del mes.</span></button><button class="register-choice-btn" data-flow-target="recurringPanel" type="button"><b>↻ Recurrente, deuda o servicio variable</b><span>Pagos que se repiten, cambian de importe o necesitan planificación.</span></button></div><div class="register-flow-hint">Tip: los gastos comunes deben marcarse como compartidos para que aparezcan en Aportes y Casa común.</div></article>
+      <section class="register-single-grid">
+        <article class="section-card register-panel" id="incomePanel"><h4>Nuevo ingreso puntual</h4><form id="incomeForm"><div class="inline-grid"><div class="field"><label>Concepto</label><input name="concept" required placeholder="Ej. Nómina DirectMarkt" /></div><div class="field"><label>Monto</label><input name="amount" type="number" step="0.01" min="0" required placeholder="0,00" /></div></div><div class="inline-grid"><div class="field"><label>Fecha</label><input name="date" type="date" value="${todayISO()}" /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions("income")}</select></div></div><div class="field"><label>Miembro</label><select name="member_id">${memberOptions(state.user.id)}</select></div><div class="field"><label>Notas</label><textarea name="notes" placeholder="Opcional"></textarea></div><button class="btn primary" type="submit">Guardar ingreso</button></form></article>
+        <article class="section-card register-panel" id="expensePanel"><h4>Nuevo gasto puntual</h4><form id="expenseForm"><div class="inline-grid"><div class="field"><label>Concepto</label><input name="concept" required placeholder="Ej. Compra, gas, comida, gasolina" /></div><div class="field"><label>Monto total</label><input name="amount" type="number" step="0.01" min="0" required placeholder="0,00" /></div></div><div class="inline-grid"><div class="field"><label>Fecha</label><input name="date" type="date" value="${todayISO()}" /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions("expense")}</select></div></div><div class="inline-grid"><div class="field"><label>Responsable</label><select name="member_id">${memberOptions(state.user.id)}</select></div><div class="field"><label>Tipo de gasto</label><select name="kind"><option value="personal">Personal</option><option value="shared">Compartido / casa</option><option value="debt">Deuda</option><option value="vehicle">Vehículo</option></select></div></div><label class="switch-row"><span><strong>¿Gasto compartido?</strong><br><span class="hint">Alquiler, comida de casa, luz, agua, gas, internet...</span></span><input name="is_shared" type="checkbox" /></label><div class="field"><label>Método de reparto</label><select name="share_method"><option value="equal">Partes iguales</option><option value="income">Según ingresos</option><option value="manual">Manual</option></select></div><div class="field"><label>Notas</label><textarea name="notes" placeholder="Opcional"></textarea></div><button class="btn primary" type="submit">Guardar gasto</button></form></article>
+        <article class="section-card register-panel" id="recurringPanel"><h3>Recurrentes, deudas y servicios variables</h3><form id="recurringForm"><h4>Nuevo recurrente o servicio variable</h4><div class="inline-grid"><div class="field"><label>Concepto</label><input name="description" required placeholder="Ej. Nómina, luz, agua, gas, crédito coche, comida de Papito" /></div><div class="field"><label>Importe mensual / estimado</label><input name="amount" type="number" step="0.01" min="0" required placeholder="0,00" /></div></div><div class="inline-grid"><div class="field"><label>Empieza en</label><input name="start_date" type="date" value="${todayISO()}" /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions()}</select></div></div><div class="inline-grid"><div class="field"><label>Persona</label><select name="member_id">${memberOptions(state.user.id)}</select></div><div class="field"><label>Tipo de automático</label><select name="type"><option value="expense">Gasto</option><option value="income">Ingreso</option></select></div></div><div class="inline-grid"><div class="field"><label>Día de cargo</label><input name="day_of_month" type="number" min="1" max="31" value="1" /></div><div class="field"><label>Frecuencia</label><select name="frequency"><option value="monthly">Mensual</option><option value="bimonthly">Bimensual</option><option value="yearly">Anual</option></select></div></div><div class="inline-grid"><div class="field"><label>Tipo de importe</label><select name="amount_mode"><option value="fixed">Fijo</option><option value="variable">Variable</option></select></div><div class="field"><label>¿Hasta cuándo se repite?</label><select name="end_mode"><option value="indefinite">Indefinido</option><option value="months">Por meses</option><option value="years">Por años</option><option value="date">Hasta fecha</option></select></div></div><h4>Datos de deuda o préstamo</h4><div class="inline-grid"><div class="field"><label>Importe total original</label><input name="debt_original_amount" type="number" step="0.01" placeholder="Ej. 11000" /></div><div class="field"><label>Entidad / referencia</label><input name="debt_lender" placeholder="Ej. Sofinco, Campus Training" /></div></div><label class="switch-row"><span><strong>¿Automático compartido?</strong><br><span class="hint">Útil para alquiler, luz, agua, gas, internet o comida de casa.</span></span><input name="is_shared" type="checkbox" /></label><label class="switch-row"><span><strong>Activo</strong><br><span class="hint">Desactívalo cuando ya no aplique.</span></span><input name="active" type="checkbox" checked /></label><div class="field"><label>Notas</label><textarea name="notes" placeholder="Cuota coche, agua bimensual, comida mensual del perro..."></textarea></div><button class="btn primary" type="submit">Guardar automático</button></form></article>
+      </section>`;
+  }
+
+  function renderMovements() {
+    const items = getMovementsFiltered();
+    const extra = `<div class="field"><label>Tipo</label><select id="filterType"><option value="all" ${state.filters.movementType === "all" ? "selected" : ""}>Todos</option><option value="income" ${state.filters.movementType === "income" ? "selected" : ""}>Ingresos</option><option value="expense" ${state.filters.movementType === "expense" ? "selected" : ""}>Gastos</option></select></div>`;
+    const categoryFilter = `<div class="field"><label>Categoría</label><select id="filterCategory"><option value="all" ${state.filters.category === "all" ? "selected" : ""}>Todas</option>${state.categories.map(c=>`<option value="${c.id}" ${state.filters.category === c.id ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}</select></div>`;
+    const searchFilter = `<div class="field"><label>Buscar</label><input id="filterSearch" value="${escapeHtml(state.filters.search || "")}" placeholder="Concepto, nota, categoría o persona" /></div>`;
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">📋</div><div><h3>Movimientos del mes</h3><p>Consulta, filtra, edita y elimina según tus permisos.</p></div></div></section><article class="section-card">${periodToolbar()}<div class="filters">${categoryFilter}${extra}${searchFilter}</div>${renderMovementTable(items, true)}</article>`;
+  }
+
+  function renderRecurring() {
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🔁</div><div><h3>Recurrentes configurados</h3><p>Pagos, ingresos, deudas y servicios variables que se repiten.</p></div></div></section><article class="section-card"><h4>Automáticos y servicios configurados</h4>${state.recurring.length ? `<div class="table-wrap"><table><thead><tr><th>Concepto</th><th>Tipo</th><th>Importe</th><th>Día</th><th>Frecuencia</th><th>Persona</th><th>Compartido</th><th>Estado</th></tr></thead><tbody>${state.recurring.map(r=>`<tr><td>${escapeHtml(r.description)}</td><td>${r.type==='income'?'Ingreso':'Gasto'}</td><td><strong>${money(r.amount)}</strong></td><td>${escapeHtml(r.day_of_month || '-')}</td><td>${escapeHtml(r.frequency || 'monthly')}</td><td>${escapeHtml(memberName(r.member_id || r.user_id))}</td><td>${r.is_shared?'Sí':'No'}</td><td>${r.active!==false?'Activo':'Inactivo'}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>Sin recurrentes todavía</strong>Créalo desde Registrar.</div>`}</article>`;
+  }
+
+  function renderHousehold() {
+    const items = movementsForMonthPerson(activeMonth(), "all", { respectType: false });
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">👨‍👩‍👧‍👦</div><div><h3> Aportes del hogar y ahorro por persona</h3><p>Contabilidad doméstica avanzada: quién ingresa, quién paga, qué parte corresponde a cada persona y cuánto podría ahorrar cada miembro.</p></div></div></section><div class="help-banner"><span class="hb-icon">🧭</span><div><strong>Cómo leer esta sección:</strong> crea miembros, registra ingresos y marca como compartidos los gastos comunes como luz, agua, gas, internet, alquiler o comida.</div></div><div class="guide-steps"><div class="guide-step-card"><span class="step-marker">1</span><div><b>Elige el mes</b><span>Todo se calcula sobre el mes activo.</span></div></div><div class="guide-step-card"><span class="step-marker">2</span><div><b>Crea el hogar</b><span>Añade adultos y dependientes.</span></div></div><div class="guide-step-card"><span class="step-marker">3</span><div><b>Registra ingresos</b><span>Nóminas por persona.</span></div></div><div class="guide-step-card"><span class="step-marker">4</span><div><b>Marca gastos comunes</b><span>Divide servicios y alquiler.</span></div></div><div class="guide-step-card"><span class="step-marker">5</span><div><b>Revisa aportes</b><span>Consulta cuánto paga cada persona.</span></div></div></div><div class="household-summary-grid">${householdKpis(items)}</div><div class="household-grid"><article class="section-card"><h4>Resumen por persona</h4><p class="sub">Ingresos, gastos personales, parte compartida, aporte real y ahorro estimado.</p><div class="advice-list">${renderMemberContributions(items)}</div></article><article class="section-card"><h4>Gastos comunes del mes</h4><p class="sub">Gastos marcados como compartidos y cómo se reparten.</p><div class="advice-list">${renderCommonExpenses(items)}</div></article></div><article class="section-card" style="margin-top:14px"><h4>Lectura rápida del hogar</h4><div class="advice-list">${renderHouseholdInsights(items)}</div></article>`;
+  }
+
+  function householdKpis(items) {
+    const m = metricsFor(items);
+    const contributors = contributionMembers();
+    const sharedPer = m.sharedExpense / Math.max(1, contributors.length);
+    return `<div class="household-kpi"><span>Ingresos hogar</span><strong>${money(m.totalIncome)}</strong><em>Vista activa</em></div><div class="household-kpi"><span>Gasto común</span><strong>${money(m.sharedExpense)}</strong><em>${contributors.length || 1} aportantes activos</em></div><div class="household-kpi"><span>Parte estimada</span><strong>${money(sharedPer)}</strong><em>Promedio por aportante</em></div><div class="household-kpi"><span>Balance</span><strong>${money(m.balance)}</strong><em>${m.balance>=0?'Positivo':'Negativo'}</em></div>`;
+  }
+
+  function renderMemberContributions() {
+    const members = activeHouseholdMembers();
+    if (!members.length) return `<div class="empty-state"><strong>Sin miembros</strong>Agrega integrantes o invita usuarios.</div>`;
+    return members.map(mem => {
+      const id = mem.user_id;
+      const mine = movementsForMonthPerson(activeMonth(), id, { respectType: false });
+      const mm = metricsFor(mine);
+      const sharedAssigned = sum(mine.filter(x => x.type === "expense" && x.is_shared), x => x.amount);
+      return `<div class="person-summary-card"><header><h5>${escapeHtml(memberName(id))}${mem.dependent ? ' <span class="hint">· Dependiente</span>' : ''}</h5><span class="settlement-pill ${mm.balance>=0?'positive':'negative'}">${money(mm.balance)}</span></header><div class="person-grid"><div class="mini-stat"><span>Ingresos</span><strong>${money(mm.totalIncome)}</strong></div><div class="mini-stat"><span>Gastos propios</span><strong>${money(mm.totalExpense - sharedAssigned)}</strong></div><div class="mini-stat"><span>Parte común</span><strong>${money(sharedAssigned)}</strong></div></div></div>`;
+    }).join("");
+  }
+
+  function renderCommonExpenses(items) {
+    const shared = items.filter(x => x.type === "expense" && x.is_shared && !x._allocated);
+    const members = contributionMembers();
+    if (!shared.length) return `<div class="empty-state"><strong>Sin gastos comunes</strong>Marca gastos como compartidos para ver el reparto.</div>`;
+    return shared.map(x => `<div class="common-expense-row"><header><b>${escapeHtml(x.description || categoryName(x.category_id))}</b><strong>${money(x.amount)}</strong></header><div class="mini-share-list">${members.map(m=>`${escapeHtml(memberName(m.user_id))}: ${money(Number(x.amount || 0) * memberShareRatio(m.user_id, x))}`).join(" · ")}</div></div>`).join("");
+  }
+
+  function renderHouseholdInsights(items) {
+    const m = metricsFor(items);
+    return `<div class="advice ok"><span>✓</span><div><b>Dato guardado</b><p>Cada registro queda en PostgreSQL/Supabase, no en caché del navegador.</p></div></div><div class="advice ${m.balance>=0?'ok':'warn'}"><span class="badge">${m.balance>=0?'✓':'!'}</span><div><b>${m.balance>=0?'Hogar en positivo':'Hogar en negativo'}</b><p>Balance del mes: ${money(m.balance)}.</p></div></div>`;
+  }
+
+  function renderMembersSection() {
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🏠</div><div><h3>Miembros del hogar</h3><p>Administra integrantes, roles, ingresos estimados, participación y datos de cobro. Los cambios quedan en Supabase.</p></div></div></section>
+    <section class="members-grid">
+      <article class="section-card"><h4 id="memberFormTitle">Nuevo miembro / invitación</h4>
+        <form id="memberForm">
+          <input name="member_id" type="hidden" />
+          <div class="field"><label>Tipo de hogar</label><select name="household_type"><option value="family">Familia</option><option value="shared">Piso compartido</option><option value="couple">Pareja</option><option value="single">Una persona</option></select></div>
+          <div class="field"><label>Nombre visible</label><input name="full_name" placeholder="Ej. Mercedes" /></div>
+          <div class="field"><label>Email para invitar</label><input name="email" type="email" placeholder="correo@dominio.com" /><p class="hint">Para editar un miembro existente no hace falta cambiar el email. El nombre visible se guarda en el hogar.</p></div>
+          <div class="inline-grid"><div class="field"><label>Ingreso mensual estimado / sueldo</label><input name="monthly_income" type="number" step="0.01" placeholder="Ej. 1278" /></div><div class="field"><label>Día de cobro</label><input name="pay_day" type="number" min="1" max="31" value="1" /></div></div>
+          <div class="inline-grid"><div class="field"><label>% participación sugerido</label><input name="participation_percent" type="number" step="0.01" placeholder="Ej. 50" /></div><div class="field"><label>Rol de acceso</label><select name="role"><option value="member">Miembro</option><option value="viewer">Solo lectura</option><option value="admin">Administrador</option></select></div></div>
+          <div class="field"><label>Estado</label><select name="status"><option value="active">Activo</option><option value="disabled">Inactivo</option></select></div>
+          <label class="switch-row"><span>Trabaja</span><input name="works" type="checkbox" checked /></label>
+          <label class="switch-row"><span>Aporta ingresos</span><input name="contributes_income" type="checkbox" checked /></label>
+          <label class="switch-row"><span>Es dependiente</span><input name="dependent" type="checkbox" /></label>
+          <div class="form-actions"><button class="btn primary" type="submit" id="saveMemberBtn">Guardar / invitar</button><button class="btn ghost hidden" type="button" id="cancelMemberEdit">Cancelar edición</button></div>
+        </form>
+      </article>
+      <article class="section-card"><h4>Personas registradas</h4>${renderMembersAdmin()}</article>
+    </section>`;
+  }
+
+  function renderCategories() {
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🏷️</div><div><h3>Categorías y presupuestos</h3><p>Organiza ingresos y gastos con presupuesto mensual para detectar excesos.</p></div></div></section><section class="categories-grid"><article class="section-card"><h4>Nueva categoría</h4><form id="categoryForm"><input name="id" type="hidden" /><div class="field"><label>Nombre</label><input name="name" required placeholder="Ej. Mascotas" /></div><div class="inline-grid"><div class="field"><label>Tipo</label><select name="type"><option value="expense">Gasto</option><option value="income">Ingreso</option><option value="both">Ambos</option></select></div><div class="field"><label>Presupuesto mensual</label><input name="budget" type="number" step="0.01" placeholder="Solo gastos" /></div></div><div class="field"><label>Color</label><input name="color" type="color" value="#4aa8ff" /></div><button class="btn primary" type="submit">Guardar categoría</button></form></article><article class="section-card"><h4>Listado de categorías</h4>${state.categories.length ? `<div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Tipo</th><th>Presupuesto</th><th>Color</th><th>Acciones</th></tr></thead><tbody>${state.categories.map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.type)}</td><td>${money(c.budget || 0)}</td><td><span class="tag" style="background:${escapeHtml(c.color || '#4aa8ff')};color:white">${escapeHtml(c.color || '')}</span></td><td><button class="btn small danger" data-delete-category="${c.id}">Borrar</button></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>Sin categorías</strong>Crea tus primeras categorías.</div>`}</article></section>`;
+  }
+
+  function renderGoals() {
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🎯</div><div><h3>Metas de ahorro</h3><p>Objetivos personales o familiares con progreso, fecha límite y notas.</p></div></div></section><section class="goals-grid"><article class="section-card"><h4>Nueva meta de ahorro</h4><form id="goalForm"><div class="field"><label>Nombre de la meta</label><input name="name" required placeholder="Ej. Fondo de emergencia, Vacaciones 2026" /></div><div class="inline-grid"><div class="field"><label>Importe objetivo (€)</label><input name="target_amount" type="number" step="0.01" required /></div><div class="field"><label>Ahorro acumulado (€)</label><input name="current_amount" type="number" step="0.01" value="0" /></div></div><div class="inline-grid"><div class="field"><label>Fecha límite</label><input name="deadline" type="date" /></div><div class="field"><label>Icono</label><select name="emoji"><option>🎯</option><option>🏠</option><option>🚗</option><option>✈️</option><option>🛟</option><option>💰</option></select></div></div><div class="field"><label>Notas</label><textarea name="notes" placeholder="Describe para qué es esta meta o cómo vas a ahorrar"></textarea></div><button class="btn primary" type="submit">Guardar meta</button></form></article><article class="section-card"><h4>Mis metas</h4>${state.goals.length ? state.goals.map(g=>{ const p = pct(g.current_amount, g.target_amount); return `<div class="goal-card"><header><h5>${escapeHtml(g.emoji || '🎯')} ${escapeHtml(g.name)}</h5><button class="btn small danger" data-delete-goal="${g.id}">Borrar</button></header><div class="goal-progress-info"><span>${money(g.current_amount)} / ${money(g.target_amount)}</span><b>${p}%</b></div><div class="goal-bar"><span style="width:${p}%"></span></div><p class="hint">${escapeHtml(g.notes || '')}</p></div>`; }).join("") : `<div class="empty-state"><strong>Sin metas todavía</strong>Añade tu primer objetivo de ahorro.</div>`}</article></section>`;
+  }
+
+  function renderVehicles() {
+    const totalYear = vehicleTotalSpent(null, activeYear());
+    const activeInsurances = state.vehicleRecords.filter(r=>r.type==='insurance' && r.status !== 'cancelado').length;
+    const alerts = state.vehicleRecords.filter(r=>r.next_date || r.coverage_end).slice(0,8);
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🚘</div><div><h3>Vehículos, seguros y mantenimiento</h3><p>Controla coches y motos: seguros anuales, cuotas financiadas, revisiones, aceite, neumáticos, repuestos, reparaciones y próximos avisos.</p></div></div></section><div class="help-banner"><span class="hb-icon">🛠️</span><div><strong>Cómo usar este módulo:</strong> primero registra cada vehículo. Después añade seguros, mantenimientos o repuestos. Los importes con fecha se suman como gasto de vehículo en el mes correspondiente.</div></div><article class="section-card"><h4>Flujo recomendado para controlar tus vehículos</h4><div class="vehicle-flow-grid"><a class="vehicle-flow-step" href="#vehicleForm"><span>1</span><b>Registrar vehículo</b><em>Coche, moto, matrícula y responsable.</em></a><a class="vehicle-flow-step" href="#vehicleInsuranceForm"><span>2</span><b>Añadir seguro</b><em>Al contado o financiado por cuotas.</em></a><a class="vehicle-flow-step" href="#vehicleRecordForm"><span>3</span><b>Mantenimiento</b><em>Aceite, neumáticos, ITV, frenos, batería.</em></a><a class="vehicle-flow-step" href="#vehicleRecordsList"><span>4</span><b>Revisar historial</b><em>Consulta gastos y próximos avisos.</em></a></div></article><section class="vehicle-kpi-grid"><article class="metric"><small>Vehículos</small><strong>${state.vehicles.length}</strong><em>Coches, motos u otros activos</em></article><article class="metric"><small>Gasto anual vehículo</small><strong>${money(totalYear)}</strong><em>Año ${activeYear()}</em></article><article class="metric"><small>Seguros activos</small><strong>${activeInsurances}</strong><em>Pólizas o planes registrados</em></article><article class="metric"><small>Avisos próximos</small><strong>${alerts.length}</strong><em>Mantenimientos o vencimientos</em></article></section><div class="vehicles-grid"><article class="section-card">${renderVehicleForm()}</article><article class="section-card"><h4><span class="step-marker soft">1B</span>Vehículos registrados</h4>${renderVehicleList()}</article></div><div class="vehicle-panel-grid"><article class="section-card">${renderInsuranceForm()}</article><article class="section-card">${renderVehicleRecordForm()}</article></div><div class="vehicle-panel-grid"><article class="section-card"><h4><span class="step-marker soft">4</span>Seguros registrados</h4>${renderVehicleRecordsTable(state.vehicleRecords.filter(r=>r.type==='insurance'))}</article><article class="section-card"><h4><span class="step-marker soft">5</span>Alertas y próximos avisos</h4>${alerts.length ? renderVehicleRecordsTable(alerts) : `<div class="empty-state"><strong>Sin avisos urgentes</strong>Cuando una revisión, ITV, aceite, neumáticos o próximo kilometraje esté cerca, aparecerá aquí.</div>`}</article></div><article class="section-card" id="vehicleRecordsList"><h4><span class="step-marker soft">6</span>Historial de mantenimiento y gastos</h4>${renderVehicleRecordsTable(state.vehicleRecords.filter(r=>r.type!=='insurance'))}</article>`;
+  }
+
+  function renderHistory() {
+    const years = [...new Set([...state.movements, ...state.vehicleRecords].map(x=>String(x.date||'').slice(0,4)).filter(Boolean))].sort().reverse();
+    const year = state.filters.year || String(new Date().getFullYear());
+    const monthly = Array.from({length:12},(_,i)=>`${year}-${String(i+1).padStart(2,'0')}`).map(k=>({key:k, ...metricsFor(monthItems(k,'all'))}));
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🗓️</div><div><h3>Historial mensual</h3><p>Resumen por mes y detalle del mes activo.</p></div></div></section><article class="section-card history-year-card"><h4>Año visible en historial</h4><div class="field"><label>Buscar otro año</label><select id="historyYearFilter">${(years.length?years:[year]).map(y=>`<option value="${y}" ${String(y)===String(year)?'selected':''}>${y}</option>`).join('')}</select></div></article><section class="history-stack"><article class="section-card history-summary-card"><h4>Resumen por mes</h4><div class="month-strip">${monthly.map(m=>`<button class="month-pill ${m.key===activeMonth()?'active':''}" type="button" data-set-month="${m.key}"><strong>${monthName(m.key)}</strong><span>${money(m.balance)} · ${m.incomes.length+m.expenses.length} mov.</span></button>`).join('')}</div></article><article class="section-card history-detail-card"><h4>Detalle del mes activo</h4>${renderMovementTable(monthItems(), false)}</article></section>`;
+  }
+
+  function renderBackup() {
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">💾</div><div><h3>Respaldo y exportación</h3><p>Exporta tus datos visibles. La fuente real sigue siendo Supabase.</p></div></div></section><section class="backup-grid"><article class="section-card"><h4>Copias de seguridad</h4><p class="sub">Descarga JSON o CSV de lo que tu usuario tiene permiso de ver.</p><div class="form-actions"><button class="btn primary" id="exportJsonBtn">Exportar JSON</button><button class="btn dark" id="exportCsvBtn">Exportar movimientos CSV</button></div></article><article class="section-card"><h4>Zona delicada</h4><p class="sub">Para backups completos o restauraciones grandes usa Supabase Dashboard. No dependas del navegador.</p></article></section>`;
+  }
+
+  function fillMemberFormForEdit(userId) {
+    const member = state.members.find(m => m.user_id === userId);
+    if (!member) return showToast("No encontré ese miembro.", "danger");
+    if (state.activeSection !== "members") {
+      state.activeSection = "members";
+      renderApp();
+      setTimeout(() => fillMemberFormForEdit(userId), 80);
+      return;
+    }
+    const form = document.getElementById("memberForm");
+    if (!form) return;
+    const p = state.profilesByUserId[userId] || {};
+    form.member_id.value = userId;
+    form.household_type.value = member.household_type || "family";
+    form.full_name.value = member.display_name || p.full_name || "";
+    form.email.value = p.email || "";
+    form.email.disabled = true;
+    form.monthly_income.value = member.monthly_income ?? "";
+    form.pay_day.value = member.pay_day || 1;
+    form.participation_percent.value = member.participation_percent ?? "";
+    form.role.value = member.role || "member";
+    form.status.value = member.status || "active";
+    form.works.checked = member.works !== false;
+    form.contributes_income.checked = member.contributes_income !== false;
+    form.dependent.checked = Boolean(member.dependent);
+    document.getElementById("memberFormTitle").textContent = `Editando: ${memberName(userId)}`;
+    document.getElementById("saveMemberBtn").textContent = "Actualizar miembro";
+    document.getElementById("cancelMemberEdit")?.classList.remove("hidden");
+    form.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function resetMemberFormEdit() {
+    const form = document.getElementById("memberForm");
+    if (!form) return;
+    form.reset();
+    form.member_id.value = "";
+    form.email.disabled = false;
+    document.getElementById("memberFormTitle").textContent = "Nuevo miembro / invitación";
+    document.getElementById("saveMemberBtn").textContent = "Guardar / invitar";
+    document.getElementById("cancelMemberEdit")?.classList.add("hidden");
+  }
+
+  async function deactivateMember(userId) {
+    if (!isAdmin()) return showToast("Solo el admin puede desactivar miembros.", "danger");
+    if (userId === state.user?.id) return showToast("No puedes desactivarte a ti mismo.", "danger");
+    if (!confirm("¿Desactivar este miembro? No se borran sus movimientos; solo queda inactivo.")) return;
+    await withError(supabase.from("household_members").update({ status: "disabled" }).eq("household_id", state.currentHouseholdId).eq("user_id", userId), "Miembro desactivado.");
+    await loadHouseholdData();
+    renderApp();
+  }
+
+  function bindSectionActions() {
+    document.querySelectorAll('[data-flow-target]').forEach(btn => btn.addEventListener('click', () => { document.querySelectorAll('[data-flow-target]').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); document.getElementById(btn.dataset.flowTarget)?.scrollIntoView({behavior:'smooth', block:'start'}); }));
+    document.querySelectorAll('[data-set-month]').forEach(btn => btn.addEventListener('click', () => { state.filters.month = btn.dataset.setMonth; renderApp(); }));
+    document.getElementById('oldYearSelector')?.addEventListener('change', e => { const mm = String(activeMonth()).slice(5,7); state.filters.month = `${e.target.value}-${mm}`; state.filters.year = e.target.value; renderApp(); });
+    document.getElementById('historyYearFilter')?.addEventListener('change', e => { state.filters.year = e.target.value; renderApp(); });
+    document.querySelector('[data-open-expense]')?.addEventListener('click', () => { state.activeSection='register'; renderApp(); setTimeout(()=>document.getElementById('expensePanel')?.scrollIntoView({behavior:'smooth'}),50); });
+    document.getElementById('incomeForm')?.addEventListener('submit', handleIncomeSubmit);
+    document.getElementById('expenseForm')?.addEventListener('submit', handleExpenseSubmit);
+    document.getElementById('recurringForm')?.addEventListener('submit', handleRecurringSubmit);
+    document.getElementById('memberForm')?.addEventListener('submit', handleMemberSubmit);
+    document.getElementById('cancelMemberEdit')?.addEventListener('click', resetMemberFormEdit);
+    document.querySelectorAll('[data-edit-member]').forEach(btn => btn.addEventListener('click', () => fillMemberFormForEdit(btn.dataset.editMember)));
+    document.querySelectorAll('[data-deactivate-member]').forEach(btn => btn.addEventListener('click', () => deactivateMember(btn.dataset.deactivateMember)));
+    document.getElementById('categoryForm')?.addEventListener('submit', handleCategorySubmit);
+    document.getElementById('goalForm')?.addEventListener('submit', handleGoalSubmit);
+    document.getElementById('vehicleForm')?.addEventListener('submit', handleVehicleSubmit);
+    document.getElementById('vehicleInsuranceForm')?.addEventListener('submit', handleVehicleInsuranceSubmit);
+    document.getElementById('vehicleRecordForm')?.addEventListener('submit', handleVehicleRecordSubmit);
+    document.getElementById('inviteForm')?.addEventListener('submit', handleInviteSubmit);
+    document.getElementById('exportJsonBtn')?.addEventListener('click', exportJson);
+    document.getElementById('exportCsvBtn')?.addEventListener('click', exportCsv);
+    document.querySelectorAll('[data-delete-movement]').forEach(btn => btn.addEventListener('click', () => deleteMovement(btn.dataset.deleteMovement)));
+    document.querySelectorAll('[data-edit-movement]').forEach(btn => btn.addEventListener('click', () => editMovement(btn.dataset.editMovement)));
+    document.querySelectorAll('[data-delete-category]').forEach(btn => btn.addEventListener('click', () => deleteCategory(btn.dataset.deleteCategory)));
+    document.querySelectorAll('[data-delete-goal]').forEach(btn => btn.addEventListener('click', () => deleteGoal(btn.dataset.deleteGoal)));
+    document.querySelectorAll('[data-delete-vehicle]').forEach(btn => btn.addEventListener('click', () => deleteVehicle(btn.dataset.deleteVehicle)));
+    document.querySelectorAll('[data-delete-vehicle-record]').forEach(btn => btn.addEventListener('click', () => deleteVehicleRecord(btn.dataset.deleteVehicleRecord)));
+    const permissionSelect = document.getElementById('permissionUserSelect');
+    if (permissionSelect) { renderPermissionEditor(permissionSelect.value); permissionSelect.addEventListener('change', e => renderPermissionEditor(e.target.value)); }
+    document.getElementById('savePermissionsBtn')?.addEventListener('click', handleSavePermissions);
+  }
+
+  async function handleIncomeSubmit(event) {
+    event.preventDefault();
+    if (!can("movements", "create") && !can("register", "create")) return showToast("No tienes permiso para crear ingresos.", "danger");
+    const f = new FormData(event.currentTarget);
+    await withError(supabase.from("movements").insert({ household_id: state.currentHouseholdId, user_id: state.user.id, member_id: String(f.get("member_id") || state.user.id), type: "income", amount: parseAmount(f.get("amount")), date: f.get("date") || todayISO(), category_id: f.get("category_id") || null, description: String(f.get("concept") || "Ingreso").trim(), notes: String(f.get("notes") || "").trim(), kind: "personal", share_method: "none", is_shared: false }), "Ingreso guardado.");
+    await loadHouseholdData(); renderApp();
+  }
+
+  async function handleExpenseSubmit(event) {
+    event.preventDefault();
+    if (!can("movements", "create") && !can("register", "create")) return showToast("No tienes permiso para crear gastos.", "danger");
+    const f = new FormData(event.currentTarget);
+    const isShared = Boolean(f.get("is_shared")) || f.get("kind") === "shared";
+    await withError(supabase.from("movements").insert({ household_id: state.currentHouseholdId, user_id: state.user.id, member_id: String(f.get("member_id") || state.user.id), type: "expense", amount: parseAmount(f.get("amount")), date: f.get("date") || todayISO(), category_id: f.get("category_id") || null, description: String(f.get("concept") || "Gasto").trim(), notes: String(f.get("notes") || "").trim(), kind: String(f.get("kind") || "personal"), share_method: String(f.get("share_method") || "equal"), is_shared: isShared }), "Gasto guardado.");
+    await loadHouseholdData(); renderApp();
+  }
+
+  async function handleRecurringSubmit(event) {
+    event.preventDefault();
+    if (!can("recurring", "create") && !can("register", "create")) return showToast("No tienes permiso para crear recurrentes.", "danger");
+    const f = new FormData(event.currentTarget);
+    const payload = {
+      household_id: state.currentHouseholdId,
+      user_id: state.user.id,
+      member_id: String(f.get("member_id") || state.user.id),
+      type: f.get("type") || "expense",
+      amount: parseAmount(f.get("amount")),
+      category_id: f.get("category_id") || null,
+      description: String(f.get("description") || "Recurrente").trim(),
+      day_of_month: Number(f.get("day_of_month") || 1),
+      frequency: f.get("frequency") || "monthly",
+      active: Boolean(f.get("active")),
+      is_shared: Boolean(f.get("is_shared")),
+      start_date: f.get("start_date") || todayISO(),
+      kind: f.get("kind") || "fixed",
+      amount_mode: f.get("amount_mode") || "fixed",
+      end_mode: f.get("end_mode") || "indefinite",
+      debt_original_amount: f.get("debt_original_amount") ? parseAmount(f.get("debt_original_amount")) : null,
+      debt_lender: String(f.get("debt_lender") || "").trim() || null,
+      notes: String(f.get("notes") || "").trim()
+    };
+    await withError(supabase.from("recurring_movements").insert(payload), "Recurrente guardado.");
+    await loadHouseholdData(); renderApp();
+  }
+
+  async function handleMemberSubmit(event) {
+    event.preventDefault();
+    if (!isAdmin()) return showToast("Solo el admin puede administrar miembros.", "danger");
+    const f = new FormData(event.currentTarget);
+    const memberId = String(f.get("member_id") || "").trim();
+    const displayName = String(f.get("full_name") || "").trim();
+    const payload = {
+      display_name: displayName || null,
+      household_type: String(f.get("household_type") || "family"),
+      monthly_income: parseAmount(f.get("monthly_income")),
+      pay_day: f.get("pay_day") ? Number(f.get("pay_day")) : null,
+      participation_percent: f.get("participation_percent") === "" ? null : parseAmount(f.get("participation_percent")),
+      role: String(f.get("role") || "member"),
+      status: String(f.get("status") || "active"),
+      works: Boolean(f.get("works")),
+      contributes_income: Boolean(f.get("contributes_income")),
+      dependent: Boolean(f.get("dependent"))
+    };
+
+    if (memberId) {
+      await withError(
+        supabase.from("household_members")
+          .update(payload)
+          .eq("household_id", state.currentHouseholdId)
+          .eq("user_id", memberId),
+        "Miembro actualizado."
+      );
+      if (memberId === state.user.id && displayName) {
+        await supabase.from("profiles").update({ full_name: displayName }).eq("user_id", state.user.id);
+      }
+      await loadHouseholdData();
+      renderApp();
+      return;
+    }
+
+    const email = String(f.get("email") || "").trim().toLowerCase();
+    if (!email) return showToast("Coloca un email para invitar a ese integrante, o pulsa Editar sobre uno existente.", "danger");
+    await withError(supabase.from("invitations").upsert({
+      household_id: state.currentHouseholdId,
+      invited_email: email,
+      full_name: displayName,
+      role: payload.role,
+      invited_by: state.user.id,
+      status: "pending"
+    }, { onConflict: "household_id,invited_email" }), "Invitación guardada. Esa persona debe registrarse con ese email.");
+    await loadHouseholdData();
+    renderApp();
+  }
+
+  async function handleCategorySubmit(event) {
+    event.preventDefault();
+    if (!can("categories", "create")) return showToast("No tienes permiso para crear categorías.", "danger");
+    const f = new FormData(event.currentTarget);
+    const payload = { household_id: state.currentHouseholdId, name: String(f.get("name") || "").trim(), type: f.get("type"), color: f.get("color") || "#4aa8ff", budget: parseAmount(f.get("budget")) };
+    await withError(supabase.from("categories").insert(payload), "Categoría creada.");
+    await loadHouseholdData(); renderApp();
+  }
+
+  async function handleGoalSubmit(event) {
+    event.preventDefault();
+    if (!can("goals", "create")) return showToast("No tienes permiso para crear metas.", "danger");
+    const f = new FormData(event.currentTarget);
+    await withError(supabase.from("goals").insert({ household_id: state.currentHouseholdId, user_id: state.user.id, name: String(f.get("name") || "").trim(), target_amount: parseAmount(f.get("target_amount")), current_amount: parseAmount(f.get("current_amount")), deadline: f.get("deadline") || null, emoji: String(f.get("emoji") || "🎯"), notes: String(f.get("notes") || "") }), "Meta guardada.");
+    await loadHouseholdData(); renderApp();
+  }
+
+  return { visibleModules, renderSection, renderApp, renderDashboard, renderRegister, renderMovements, renderRecurring, renderHousehold, renderMembersSection, renderCategories, renderGoals, renderVehicles, renderHistory, renderBackup, bindSectionActions };
+})();
+
+visibleModules = F360V3.visibleModules;
+renderSection = F360V3.renderSection;
+renderApp = F360V3.renderApp;
+renderDashboard = F360V3.renderDashboard;
+renderRegister = F360V3.renderRegister;
+renderMovements = F360V3.renderMovements;
+renderRecurring = F360V3.renderRecurring;
+renderHousehold = F360V3.renderHousehold;
+renderCategories = F360V3.renderCategories;
+renderGoals = F360V3.renderGoals;
+renderVehicles = F360V3.renderVehicles;
+renderHistory = F360V3.renderHistory;
+renderBackup = F360V3.renderBackup;
+bindSectionActions = F360V3.bindSectionActions;
+
+
+init();
