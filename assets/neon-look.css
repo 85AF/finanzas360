@@ -9433,3 +9433,163 @@ body[data-f360-theme="dark"] .admin-create-user-card .setup-note {
   border-color: rgba(255,255,255,.08);
   background: rgba(255,255,255,.045);
 }
+
+/* ==========================================================
+   V21 · Login UX privado sin pestañas
+   El registro público está cerrado: la pantalla de acceso ya no
+   necesita tabs. Se deja una sola acción clara, con contexto y
+   ayuda mínima para usuarios nuevos.
+========================================================== */
+.auth-card-clean {
+  display: grid !important;
+  gap: 24px !important;
+  align-self: center !important;
+}
+
+.auth-card-clean .auth-tabs,
+.auth-tabs.single {
+  display: none !important;
+}
+
+.auth-card-head {
+  display: grid !important;
+  gap: 10px !important;
+  margin: 0 0 2px !important;
+}
+
+.auth-chip {
+  width: fit-content !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 8px 13px !important;
+  border-radius: 999px !important;
+  color: var(--f360-accent) !important;
+  background: var(--f360-surface) !important;
+  border: 1px solid var(--f360-border) !important;
+  box-shadow: var(--f360-outset-soft) !important;
+  font-size: .76rem !important;
+  font-weight: 950 !important;
+  letter-spacing: .08em !important;
+  text-transform: uppercase !important;
+}
+
+.auth-chip::before {
+  content: "🔐";
+  font-size: .95rem;
+  letter-spacing: 0;
+}
+
+.auth-card-head h2 {
+  margin: 0 !important;
+  color: var(--f360-text-strong) !important;
+  font-size: clamp(1.75rem, 3vw, 2.35rem) !important;
+  line-height: 1 !important;
+  letter-spacing: -.045em !important;
+  text-shadow: none !important;
+}
+
+.auth-card-head p {
+  margin: 0 !important;
+  color: var(--f360-muted) !important;
+  font-size: .98rem !important;
+  line-height: 1.5 !important;
+}
+
+.auth-form-clean {
+  padding-top: 2px !important;
+}
+
+.auth-card .auth-submit,
+.auth-card-clean .auth-submit {
+  min-height: 52px !important;
+  margin-top: 8px !important;
+  font-size: .95rem !important;
+  letter-spacing: .01em !important;
+}
+
+.auth-note {
+  display: grid !important;
+  gap: 5px !important;
+  padding: 16px 18px !important;
+  border-radius: 22px !important;
+  color: var(--f360-muted) !important;
+  background: var(--f360-surface) !important;
+  border: 1px solid var(--f360-border) !important;
+  box-shadow: var(--f360-inset-soft) !important;
+  line-height: 1.45 !important;
+}
+
+.auth-note strong {
+  color: var(--f360-text-strong) !important;
+  font-size: .86rem !important;
+}
+
+.auth-note span {
+  color: var(--f360-muted) !important;
+  font-size: .91rem !important;
+}
+
+.auth-benefits {
+  max-width: 680px !important;
+  margin-top: 22px !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 12px !important;
+}
+
+.auth-benefits span {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 11px 14px !important;
+  border-radius: 999px !important;
+  background: var(--f360-surface) !important;
+  color: var(--f360-text) !important;
+  border: 1px solid var(--f360-border) !important;
+  box-shadow: var(--f360-outset-soft) !important;
+  font-size: .9rem !important;
+  font-weight: 800 !important;
+}
+
+@media (max-width: 980px) {
+  .auth-card-clean {
+    max-width: 560px !important;
+    margin: 0 auto !important;
+  }
+  .auth-hero {
+    text-align: center !important;
+  }
+  .auth-hero .brand-logo {
+    margin-inline: auto !important;
+  }
+  .auth-hero .sub {
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+  .auth-benefits {
+    justify-content: center !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .auth-wrap {
+    min-height: 100svh !important;
+    padding-top: 24px !important;
+    padding-bottom: 24px !important;
+  }
+  .auth-card-clean {
+    gap: 20px !important;
+  }
+  .auth-card-head h2 {
+    font-size: 1.75rem !important;
+  }
+  .auth-benefits {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+  .auth-benefits span {
+    justify-content: center !important;
+  }
+}

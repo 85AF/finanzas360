@@ -894,18 +894,29 @@ function renderAuth() {
       <div class="auth-hero">
         <div class="brand-logo">F3</div>
         <h1>Finanzas 360 Real.</h1>
-      </div>
-      <div class="auth-card">
-        <div class="auth-tabs single">
-          <button class="btn active dark" type="button">Entrar</button>
+        <p class="sub">Control privado del hogar: aportes, gastos compartidos, pote mensual y permisos por integrante.</p>
+        <div class="auth-benefits" aria-label="Resumen de acceso">
+          <span>🔒 Acceso asignado</span>
+          <span>👥 Roles por integrante</span>
+          <span>🏠 Datos del hogar</span>
         </div>
-        <form id="authForm">
+      </div>
+      <div class="auth-card auth-card-clean">
+        <header class="auth-card-head">
+          <span class="auth-chip">Acceso privado</span>
+          <h2>Entrar al hogar</h2>
+          <p>Usa el email y la contraseña que te entregó el administrador.</p>
+        </header>
+        <form id="authForm" class="auth-form-clean">
           <div class="field"><label>Email</label><input name="email" type="email" placeholder="correo@dominio.com" autocomplete="email" required /></div>
           ${passwordFieldHtml("password")}
-          <button class="btn primary block" type="submit">Entrar a mi hogar</button>
+          <button class="btn primary block auth-submit" type="submit">Entrar a Finanzas 360</button>
           <div id="authMessage" class="auth-message" role="alert" aria-live="polite" ${state.authError ? "" : "hidden"}>${escapeHtml(state.authError)}</div>
         </form>
-        <p class="hint">El acceso lo entrega el administrador. Los integrantes no crean cuentas desde esta pantalla.</p>
+        <div class="auth-note" aria-label="Información de acceso">
+          <strong>Sin registro público</strong>
+          <span>Si olvidaste la contraseña, pídele al administrador que te asigne una nueva.</span>
+        </div>
       </div>
     </section>
   `;
