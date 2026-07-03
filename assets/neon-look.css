@@ -8179,3 +8179,138 @@ canvas {
     border-radius: 20px !important;
   }
 }
+
+/* ==========================================================
+   V28 · Corrección final de tarjetas compactas en móvil
+   Evita textos montados en coach/resumen/aportes: cada KPI
+   se ordena en título, valor y detalle. Solo UI responsive.
+========================================================== */
+@media (max-width: 760px) {
+  .app-old-mirror .coach-summary-grid,
+  .app-old-mirror .household-summary-grid,
+  .app-old-mirror .indicator-grid,
+  .app-old-mirror .compare-kpi-grid,
+  .app-old-mirror .insights-grid,
+  .app-old-mirror .vehicle-kpi-grid {
+    width: 100% !important;
+    max-width: 100% !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 12px !important;
+    align-items: start !important;
+    overflow: visible !important;
+  }
+
+  .app-old-mirror .coach-kpi,
+  .app-old-mirror .household-kpi,
+  .app-old-mirror .indicator-grid > div,
+  .app-old-mirror .compare-kpi-grid > *,
+  .app-old-mirror .insights-grid > *,
+  .app-old-mirror .vehicle-kpi-grid > * {
+    box-sizing: border-box !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    min-height: 116px !important;
+    height: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    padding: 16px 14px !important;
+    overflow: hidden !important;
+    text-align: left !important;
+  }
+
+  .app-old-mirror .coach-kpi span,
+  .app-old-mirror .household-kpi span,
+  .app-old-mirror .indicator-grid > div span,
+  .app-old-mirror .compare-kpi-grid > * span,
+  .app-old-mirror .insights-grid > * span,
+  .app-old-mirror .vehicle-kpi-grid > * span {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    word-break: normal !important;
+    text-overflow: clip !important;
+    overflow: visible !important;
+    font-size: .82rem !important;
+    line-height: 1.16 !important;
+    letter-spacing: -.015em !important;
+  }
+
+  .app-old-mirror .coach-kpi strong,
+  .app-old-mirror .household-kpi strong,
+  .app-old-mirror .indicator-grid > div strong,
+  .app-old-mirror .compare-kpi-grid > * strong,
+  .app-old-mirror .insights-grid > * strong,
+  .app-old-mirror .vehicle-kpi-grid > * strong {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    word-break: normal !important;
+    text-overflow: clip !important;
+    overflow: visible !important;
+    font-size: clamp(1.02rem, 5vw, 1.38rem) !important;
+    line-height: 1.05 !important;
+    letter-spacing: -.035em !important;
+  }
+
+  .app-old-mirror .coach-kpi em,
+  .app-old-mirror .household-kpi em,
+  .app-old-mirror .indicator-grid > div em,
+  .app-old-mirror .compare-kpi-grid > * em,
+  .app-old-mirror .insights-grid > * em,
+  .app-old-mirror .vehicle-kpi-grid > * em {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    word-break: normal !important;
+    text-overflow: clip !important;
+    overflow: visible !important;
+    font-size: .76rem !important;
+    line-height: 1.22 !important;
+    font-style: normal !important;
+  }
+
+  .app-old-mirror .f360-card-toolbar h4 {
+    white-space: normal !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+}
+
+@media (max-width: 390px) {
+  .app-old-mirror .coach-summary-grid,
+  .app-old-mirror .household-summary-grid,
+  .app-old-mirror .indicator-grid,
+  .app-old-mirror .compare-kpi-grid,
+  .app-old-mirror .insights-grid,
+  .app-old-mirror .vehicle-kpi-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .app-old-mirror .coach-kpi,
+  .app-old-mirror .household-kpi,
+  .app-old-mirror .indicator-grid > div,
+  .app-old-mirror .compare-kpi-grid > *,
+  .app-old-mirror .insights-grid > *,
+  .app-old-mirror .vehicle-kpi-grid > * {
+    min-height: 0 !important;
+    padding: 15px 14px !important;
+  }
+}
