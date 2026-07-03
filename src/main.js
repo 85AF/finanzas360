@@ -443,12 +443,6 @@ function renderAuth() {
       <div class="auth-hero">
         <div class="brand-logo">F3</div>
         <h1>Finanzas 360 Real.</h1>
-        <p class="sub">Base de datos real, usuarios, roles, permisos y hogar compartido. Nada de depender de la caché del navegador.</p>
-        <div class="grid-3 auth-features" style="margin-top:18px">
-          <div class="metric"><div class="top"><small>BBDD</small><span class="icon">🗄️</span></div><strong>Supabase</strong><em>PostgreSQL con seguridad RLS.</em></div>
-          <div class="metric good"><div class="top"><small>Usuarios</small><span class="icon">👥</span></div><strong>Roles</strong><em>Admin, miembro y lectura.</em></div>
-          <div class="metric warn"><div class="top"><small>Online</small><span class="icon">🌐</span></div><strong>24/7</strong><em>Listo para Vercel o GitHub Pages.</em></div>
-        </div>
       </div>
       <div class="auth-card">
         <div class="auth-tabs">
