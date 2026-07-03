@@ -11168,207 +11168,103 @@ body {
 }
 
 /* ==========================================================
-   V28 · UX FOUNDATION PASS · Krug + Norman + Laws of UX + M3
-   Capa visual/experiencia solamente. No cambia BBDD, permisos,
-   Supabase, cálculos ni persistencia.
+   HOTFIX V29 · RECUPERACIÓN DE SCROLL + BOTONES + UX SEGURA
+   Objetivo: corregir el bloqueo de navegación causado por el
+   scroll automático del menú y mantener mejoras visuales sin
+   alterar Supabase, cálculos, permisos ni base de datos.
 ========================================================== */
-:root,
-html[data-f360-theme="light"],
-body[data-f360-theme="light"] {
-  --ux-page-max: 1540px;
-  --ux-sidebar-width: 292px;
-  --ux-page-pad-x: clamp(22px, 3.4vw, 56px);
-  --ux-page-pad-y: clamp(22px, 3vw, 44px);
-  --ux-gap-xs: 8px;
-  --ux-gap-sm: 12px;
-  --ux-gap-md: 18px;
-  --ux-gap-lg: 26px;
-  --ux-gap-xl: 34px;
-  --ux-touch: 48px;
-  --ux-radius-card: 30px;
-  --ux-radius-field: 18px;
-  --ux-focus: 0 0 0 4px rgba(76,147,255,.22), 0 0 0 1px rgba(76,147,255,.45);
-  --ux-card-shadow: 12px 12px 30px rgba(141,158,183,.20), -10px -10px 26px rgba(255,255,255,.92);
-  --ux-card-shadow-soft: 7px 7px 18px rgba(141,158,183,.16), -6px -6px 18px rgba(255,255,255,.82);
-  --ux-surface-glass: linear-gradient(145deg, rgba(255,255,255,.94), rgba(239,247,255,.82));
-  --ux-surface-muted: rgba(246,250,255,.88);
-  --ux-border-strong: rgba(103,133,170,.26);
-}
 
-html[data-f360-theme="dark"],
-body[data-f360-theme="dark"] {
-  --ux-card-shadow: 10px 10px 28px rgba(0,0,0,.28), -8px -8px 20px rgba(255,255,255,.035);
-  --ux-card-shadow-soft: 6px 6px 18px rgba(0,0,0,.24), -4px -4px 16px rgba(255,255,255,.028);
-  --ux-surface-glass: linear-gradient(145deg, rgba(29,38,54,.96), rgba(20,29,43,.90));
-  --ux-surface-muted: rgba(18,28,42,.74);
-  --ux-border-strong: rgba(152,177,210,.22);
-  --ux-focus: 0 0 0 4px rgba(85,206,242,.18), 0 0 0 1px rgba(85,206,242,.42);
+:root {
+  --f360-safe-touch: 46px;
+  --f360-safe-gap: clamp(12px, 1.7vw, 22px);
+  --f360-safe-card-pad: clamp(16px, 2.2vw, 28px);
+  --f360-safe-radius: clamp(20px, 2.2vw, 30px);
 }
 
 html {
+  scroll-behavior: auto !important;
   overflow-x: hidden !important;
-  scroll-behavior: smooth;
 }
 
 body {
   overflow-x: hidden !important;
-  text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-.app.app-sidebar.app-old-mirror {
-  grid-template-columns: var(--ux-sidebar-width) minmax(0, 1fr) !important;
-  background:
-    radial-gradient(circle at 20% 0%, rgba(76,147,255,.10), transparent 34rem),
-    radial-gradient(circle at 100% 18%, rgba(85,206,242,.12), transparent 34rem),
-    var(--f360-bg) !important;
+/* Los controles nunca deben perder el click ni quedar por debajo de capas decorativas. */
+.app-old-mirror button,
+.app-old-mirror .btn,
+.app-old-mirror input,
+.app-old-mirror select,
+.app-old-mirror textarea,
+.app-old-mirror label,
+.app-old-mirror a {
+  position: relative;
+  z-index: 2;
 }
 
-.app-old-mirror .side-nav.old-side,
-.app-old-mirror .old-side {
-  width: var(--ux-sidebar-width) !important;
-  padding: 24px 18px !important;
-  display: flex !important;
-  flex-direction: column !important;
-  gap: 18px !important;
-  background: var(--ux-surface-glass) !important;
-  border-right: 1px solid var(--ux-border-strong) !important;
-  box-shadow: 18px 0 44px rgba(45,72,112,.10) !important;
+.app-old-mirror button,
+.app-old-mirror .btn,
+.app-old-mirror select,
+.app-old-mirror input:not([type="checkbox"]):not([type="radio"]) {
+  min-height: var(--f360-safe-touch) !important;
 }
 
-.app-old-mirror .old-side-brand {
-  display: grid !important;
-  grid-template-columns: 48px minmax(0, 1fr) !important;
-  align-items: center !important;
-  gap: 12px !important;
-  padding: 2px 4px 8px !important;
+.app-old-mirror button,
+.app-old-mirror .btn,
+.app-old-mirror .chip {
+  touch-action: manipulation;
 }
 
-.app-old-mirror .old-side-brand h1,
-.app-old-mirror .old-side-brand span,
-.app-old-mirror .side-user strong,
-.app-old-mirror .side-user span {
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
+.app-old-mirror button:focus-visible,
+.app-old-mirror .btn:focus-visible,
+.app-old-mirror input:focus-visible,
+.app-old-mirror select:focus-visible,
+.app-old-mirror textarea:focus-visible {
+  outline: 3px solid rgba(76, 147, 255, .34) !important;
+  outline-offset: 3px !important;
 }
 
-.app-old-mirror .side-household-name,
-.app-old-mirror .side-switch {
-  background: var(--ux-surface-muted) !important;
-  border: 1px solid var(--f360-border) !important;
-  border-radius: 20px !important;
-  padding: 12px 14px !important;
-  min-height: var(--ux-touch) !important;
-  box-shadow: inset 2px 2px 7px rgba(127,147,176,.12), inset -2px -2px 7px rgba(255,255,255,.46) !important;
-}
-
-.app-old-mirror .old-menu {
-  gap: 9px !important;
-  min-height: 0 !important;
-  padding: 2px 2px 8px !important;
-}
-
-.app-old-mirror .old-menu button {
-  min-height: var(--ux-touch) !important;
-  grid-template-columns: 36px minmax(0, 1fr) !important;
-  gap: 10px !important;
-  border-radius: 18px !important;
-  padding: 9px 12px !important;
-  text-align: left !important;
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  box-shadow: none !important;
-  color: var(--f360-muted) !important;
-}
-
-.app-old-mirror .old-menu button:hover {
-  background: var(--ux-surface-muted) !important;
-  color: var(--f360-text-strong) !important;
-  transform: translateY(-1px) !important;
-}
-
-.app-old-mirror .old-menu button.active,
-.app-old-mirror .old-menu button[aria-current="page"] {
-  background: var(--f360-btn-bg) !important;
-  color: var(--f360-text-strong) !important;
-  border-color: var(--f360-border) !important;
-  box-shadow: var(--f360-btn-pressed) !important;
-}
-
-.app-old-mirror .old-menu button span {
-  width: 34px !important;
-  height: 34px !important;
-  display: grid !important;
-  place-items: center !important;
-  flex: 0 0 34px !important;
-  border-radius: 14px !important;
-  background: rgba(76,147,255,.12) !important;
-}
-
-.app-old-mirror .old-menu button.active span,
-.app-old-mirror .old-menu button[aria-current="page"] span {
-  background: linear-gradient(135deg, var(--f360-accent), #55cef2) !important;
-  color: #fff !important;
-  box-shadow: 0 10px 20px rgba(76,147,255,.22) !important;
-}
-
-.app-old-mirror .side-footer {
-  margin-top: auto !important;
-  padding-top: 16px !important;
-  display: grid !important;
-  gap: 10px !important;
-}
-
+/* Respiración general sin reescribir el layout completo. */
 .app-old-mirror .content-area.old-content {
-  padding: var(--ux-page-pad-y) var(--ux-page-pad-x) 110px !important;
-  display: grid !important;
-  gap: var(--ux-gap-xl) !important;
-  align-content: start !important;
+  gap: var(--f360-safe-gap) !important;
 }
 
-.app-old-mirror .content-area.old-content > * {
-  width: min(100%, var(--ux-page-max)) !important;
-  max-width: var(--ux-page-max) !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
+.app-old-mirror .section-card,
+.app-old-mirror .card,
+.app-old-mirror .metric,
+.app-old-mirror .table-wrap,
+.app-old-mirror .monthly-contribution-card,
+.app-old-mirror .house-pot-card,
+.app-old-mirror .coach-panel,
+.app-old-mirror .finance-command-center,
+.app-old-mirror .analytics-toolbar.old-analysis {
+  border-radius: var(--f360-safe-radius) !important;
 }
 
-.app-old-mirror .content-area.old-content > * + * {
-  margin-top: 0 !important;
+.app-old-mirror .section-card,
+.app-old-mirror .card,
+.app-old-mirror .monthly-contribution-card,
+.app-old-mirror .house-pot-card,
+.app-old-mirror .coach-panel,
+.app-old-mirror .finance-command-center,
+.app-old-mirror .analytics-toolbar.old-analysis {
+  padding: var(--f360-safe-card-pad) !important;
 }
 
 .app-old-mirror .section-header,
 .app-old-mirror .page-head,
 .app-old-mirror .old-title-row {
-  padding: clamp(22px, 2.6vw, 34px) !important;
-  margin: 0 !important;
-  border-radius: var(--ux-radius-card) !important;
-  background: var(--ux-surface-glass) !important;
-  border: 1px solid var(--f360-border) !important;
-  box-shadow: var(--ux-card-shadow-soft) !important;
-}
-
-.app-old-mirror .section-icon-row {
-  display: grid !important;
-  grid-template-columns: 56px minmax(0, 1fr) !important;
-  gap: 16px !important;
-  align-items: start !important;
-}
-
-.app-old-mirror .section-badge {
-  width: 56px !important;
-  height: 56px !important;
-  border-radius: 20px !important;
+  padding: var(--f360-safe-card-pad) !important;
+  border-radius: var(--f360-safe-radius) !important;
 }
 
 .app-old-mirror .section-header h3,
 .app-old-mirror .page-head h2,
 .app-old-mirror .old-title-row h3 {
-  max-width: 980px !important;
-  font-size: clamp(1.85rem, 3.2vw, 3.35rem) !important;
-  line-height: .98 !important;
-  letter-spacing: -.055em !important;
+  line-height: 1.03 !important;
+  overflow-wrap: anywhere !important;
 }
 
 .app-old-mirror .section-header p,
@@ -11377,77 +11273,7 @@ body {
 .app-old-mirror .sub,
 .app-old-mirror .hint,
 .app-old-mirror .muted {
-  line-height: 1.55 !important;
-}
-
-.app-old-mirror .app-section-guide {
-  width: min(100%, var(--ux-page-max)) !important;
-  margin: -16px auto 0 !important;
-  display: grid !important;
-  grid-template-columns: 38px minmax(0, 1fr) !important;
-  gap: 12px !important;
-  align-items: center !important;
-  padding: 14px 16px !important;
-  border-radius: 22px !important;
-  background: rgba(76,147,255,.075) !important;
-  border: 1px solid rgba(76,147,255,.18) !important;
-  color: var(--f360-muted) !important;
-}
-
-.app-old-mirror .app-section-guide span {
-  width: 38px !important;
-  height: 38px !important;
-  display: grid !important;
-  place-items: center !important;
-  border-radius: 14px !important;
-  background: rgba(76,147,255,.12) !important;
-}
-
-.app-old-mirror .app-section-guide small {
-  font-size: .9rem !important;
-  line-height: 1.45 !important;
-}
-
-.app-old-mirror .section-card,
-.app-old-mirror .card,
-.app-old-mirror .metric,
-.app-old-mirror .table-wrap,
-.app-old-mirror .old-period .quick-period-card,
-.app-old-mirror .old-period .month-history-card,
-.app-old-mirror .analytics-toolbar.old-analysis,
-.app-old-mirror .coach-panel,
-.app-old-mirror .finance-command-center,
-.app-old-mirror .monthly-contribution-card,
-.app-old-mirror .house-pot-card {
-  border-radius: var(--ux-radius-card) !important;
-  background: var(--ux-surface-glass) !important;
-  border: 1px solid var(--f360-border) !important;
-  box-shadow: var(--ux-card-shadow) !important;
-  overflow: hidden !important;
-}
-
-.app-old-mirror .section-card,
-.app-old-mirror .card,
-.app-old-mirror .old-period .quick-period-card,
-.app-old-mirror .old-period .month-history-card,
-.app-old-mirror .analytics-toolbar.old-analysis,
-.app-old-mirror .coach-panel,
-.app-old-mirror .finance-command-center,
-.app-old-mirror .monthly-contribution-card,
-.app-old-mirror .house-pot-card {
-  padding: clamp(20px, 2.35vw, 32px) !important;
-}
-
-.app-old-mirror .section-card > h4:first-child,
-.app-old-mirror .coach-panel > h5:first-child,
-.app-old-mirror .section-card .section-icon-row:first-child {
-  margin-top: 0 !important;
-}
-
-.app-old-mirror .section-card > * + *,
-.app-old-mirror .coach-panel > * + *,
-.app-old-mirror .finance-command-center > * + * {
-  margin-top: var(--ux-gap-md) !important;
+  line-height: 1.5 !important;
 }
 
 .app-old-mirror .grid-main,
@@ -11464,12 +11290,7 @@ body {
 .app-old-mirror .analytics-main-grid,
 .app-old-mirror .analytics-compare-grid,
 .app-old-mirror .coach-panel-grid,
-.app-old-mirror .finance-coach-grid {
-  gap: var(--ux-gap-xl) !important;
-  margin: 0 !important;
-  align-items: start !important;
-}
-
+.app-old-mirror .finance-coach-grid,
 .app-old-mirror .metrics-grid,
 .app-old-mirror .old-kpi-grid,
 .app-old-mirror .vehicle-kpi-grid,
@@ -11478,403 +11299,86 @@ body {
 .app-old-mirror .coach-summary-grid,
 .app-old-mirror .guide-steps,
 .app-old-mirror .vehicle-flow-grid,
-.app-old-mirror .indicator-grid {
-  gap: var(--ux-gap-lg) !important;
-  margin: 0 !important;
-  align-items: stretch !important;
-}
-
-.app-old-mirror .metric,
-.app-old-mirror .old-kpi,
-.app-old-mirror .household-kpi,
-.app-old-mirror .coach-kpi,
-.app-old-mirror .indicator-grid > div {
-  min-height: 132px !important;
-  display: grid !important;
-  align-content: space-between !important;
-  gap: 10px !important;
-  padding: clamp(18px, 2vw, 24px) !important;
-}
-
-.app-old-mirror .metric small,
-.app-old-mirror .metric span,
-.app-old-mirror .old-kpi small,
-.app-old-mirror .household-kpi span,
-.app-old-mirror .coach-kpi span,
-.app-old-mirror .indicator-grid span {
-  text-transform: none !important;
-  letter-spacing: .01em !important;
-  font-size: .88rem !important;
-  color: var(--f360-muted) !important;
-}
-
-.app-old-mirror .metric strong,
-.app-old-mirror .old-kpi strong,
-.app-old-mirror .household-kpi strong,
-.app-old-mirror .coach-kpi strong,
-.app-old-mirror .indicator-grid strong {
-  max-width: 100% !important;
-  overflow-wrap: anywhere !important;
-  font-size: clamp(1.55rem, 2.7vw, 2.45rem) !important;
-  letter-spacing: -.045em !important;
-  line-height: 1 !important;
-}
-
-.app-old-mirror .old-period {
-  gap: var(--ux-gap-md) !important;
-  margin: 0 !important;
-}
-
-.app-old-mirror .period-grid.old-period-grid,
-.app-old-mirror .old-period-grid {
-  grid-template-columns: minmax(190px, .85fr) minmax(140px, .55fr) minmax(240px, .9fr) minmax(300px, 1.25fr) !important;
-  gap: var(--ux-gap-md) !important;
-  align-items: end !important;
-}
-
-.app-old-mirror .mini-note {
-  margin: 0 0 14px !important;
-  padding: 12px 14px !important;
-  border-radius: 18px !important;
-  background: rgba(76,147,255,.075) !important;
-  border: 1px solid rgba(76,147,255,.15) !important;
-}
-
-.app-old-mirror .quick-actions {
-  display: grid !important;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-  gap: 10px !important;
-}
-
-.app-old-mirror .quick-actions .btn {
-  min-width: 0 !important;
-  width: 100% !important;
-  justify-content: center !important;
-}
-
-.app-old-mirror .month-strip {
-  display: flex !important;
-  gap: 12px !important;
-  overflow-x: auto !important;
-  padding: 6px 4px 12px !important;
-  scroll-snap-type: x proximity;
-  scrollbar-width: thin;
-}
-
-.app-old-mirror .month-pill {
-  min-width: clamp(154px, 16vw, 210px) !important;
-  scroll-snap-align: start !important;
-  min-height: 86px !important;
-  align-content: center !important;
-}
-
-.app-old-mirror .month-pill strong,
-.app-old-mirror .month-pill span {
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-}
-
-.app-old-mirror input,
-.app-old-mirror select,
-.app-old-mirror textarea,
-.app-old-mirror .password-wrap {
-  min-height: var(--ux-touch) !important;
-  border-radius: var(--ux-radius-field) !important;
-  border-color: var(--f360-border) !important;
-  font-size: 16px !important;
-}
-
-.app-old-mirror textarea {
-  min-height: 118px !important;
-  resize: vertical !important;
-}
-
-.app-old-mirror label {
-  margin-bottom: 6px !important;
-  color: var(--f360-text-strong) !important;
-  font-weight: 900 !important;
-  letter-spacing: .01em !important;
-}
-
-.app-old-mirror .field {
-  gap: 7px !important;
-  min-width: 0 !important;
-}
-
+.app-old-mirror .indicator-grid,
 .app-old-mirror form,
 .app-old-mirror .form-grid,
 .app-old-mirror .inline-grid,
-.app-old-mirror .share-grid,
-.app-old-mirror .check-grid,
-.app-old-mirror .person-grid,
-.app-old-mirror .vehicle-meta-grid,
-.app-old-mirror .finance-coach-controls,
-.app-old-mirror .analytics-controls-pro,
 .app-old-mirror .filters,
 .app-old-mirror .filters-grid,
 .app-old-mirror .dashboard-filters {
-  gap: var(--ux-gap-md) !important;
-}
-
-.app-old-mirror .inline-grid,
-.app-old-mirror .finance-coach-controls,
-.app-old-mirror .analytics-controls-pro,
-.app-old-mirror .filters,
-.app-old-mirror .filters-grid,
-.app-old-mirror .dashboard-filters {
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)) !important;
-}
-
-.app-old-mirror .form-actions,
-.app-old-mirror .td-actions,
-.app-old-mirror .button-row,
-.app-old-mirror .action-row {
-  gap: 10px !important;
-  align-items: center !important;
-}
-
-.app-old-mirror .btn,
-.app-old-mirror button,
-.app-old-mirror .chip {
-  min-height: var(--ux-touch) !important;
-  touch-action: manipulation;
-}
-
-.app-old-mirror .btn.small,
-.app-old-mirror button.small,
-.app-old-mirror .td-actions .btn {
-  min-height: 40px !important;
-}
-
-.app-old-mirror .btn:focus-visible,
-.app-old-mirror button:focus-visible,
-.app-old-mirror input:focus-visible,
-.app-old-mirror select:focus-visible,
-.app-old-mirror textarea:focus-visible,
-.app-old-mirror .month-pill:focus-visible,
-.app-old-mirror .old-menu button:focus-visible {
-  outline: none !important;
-  box-shadow: var(--ux-focus) !important;
+  gap: var(--f360-safe-gap) !important;
 }
 
 .app-old-mirror .table-wrap {
-  padding: 0 !important;
   overflow-x: auto !important;
+  overflow-y: visible !important;
   -webkit-overflow-scrolling: touch !important;
-  overscroll-behavior-inline: contain;
+  max-width: 100% !important;
 }
 
 .app-old-mirror table {
-  min-width: 760px !important;
-  border-collapse: separate !important;
-  border-spacing: 0 !important;
-}
-
-.app-old-mirror th {
-  position: sticky !important;
-  top: 0 !important;
-  z-index: 2 !important;
-  background: var(--ux-surface-muted) !important;
-  color: var(--f360-text-strong) !important;
-  font-weight: 950 !important;
+  max-width: 100% !important;
 }
 
 .app-old-mirror th,
 .app-old-mirror td {
-  padding: 15px 16px !important;
   vertical-align: middle !important;
 }
 
-.app-old-mirror tbody tr:hover td {
-  background: rgba(76,147,255,.045) !important;
-}
-
-.app-old-mirror .empty-state,
-.app-old-mirror .empty-mini {
-  border-radius: 24px !important;
-  padding: 24px !important;
-  background: var(--ux-surface-muted) !important;
-  border: 1px dashed var(--ux-border-strong) !important;
-  color: var(--f360-muted) !important;
-}
-
-.app-old-mirror .advice-list,
-.app-old-mirror .priority-list,
-.app-old-mirror .smart-tip-list,
-.app-old-mirror .investment-list,
-.app-old-mirror .action-plan-list,
-.app-old-mirror .contribution-list {
-  display: grid !important;
-  gap: 14px !important;
-}
-
-.app-old-mirror .advice,
-.app-old-mirror .priority-row,
-.app-old-mirror .smart-tip,
-.app-old-mirror .investment-card,
-.app-old-mirror .action-step,
-.app-old-mirror .guide-step-card,
-.app-old-mirror .vehicle-flow-step,
-.app-old-mirror .person-summary-card,
-.app-old-mirror .common-expense-row,
-.app-old-mirror .vehicle-card,
-.app-old-mirror .goal-card,
-.app-old-mirror .category-card,
-.app-old-mirror .member-card {
-  margin: 0 !important;
-  min-width: 0 !important;
-  border-radius: 24px !important;
-  box-shadow: var(--ux-card-shadow-soft) !important;
-}
-
-.app-old-mirror .chart-bars {
-  min-height: clamp(220px, 26vw, 360px) !important;
-  align-items: end !important;
-  padding: 18px 8px 8px !important;
-}
-
-.app-old-mirror .bar,
-.app-old-mirror .house-pot-progress {
-  min-height: 13px !important;
-  border-radius: 999px !important;
-  overflow: hidden !important;
-}
-
-.app-old-mirror .auth-message,
-.auth-message {
-  border-radius: 18px !important;
-  padding: 13px 15px !important;
-  line-height: 1.45 !important;
-  border: 1px solid rgba(228,88,104,.28) !important;
-}
-
-@media (min-width: 1281px) {
-  .app-old-mirror .analytics-main-grid {
-    grid-template-columns: minmax(0, 1.2fr) minmax(360px, .8fr) !important;
-  }
-
-  .app-old-mirror .analytics-compare-grid,
-  .app-old-mirror .finance-coach-grid,
-  .app-old-mirror .grid-2 {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  }
-
-  .app-old-mirror .grid-main,
-  .app-old-mirror .vehicles-grid,
-  .app-old-mirror .vehicle-panel-grid,
-  .app-old-mirror .household-grid {
-    grid-template-columns: minmax(360px, .92fr) minmax(0, 1.08fr) !important;
-  }
-
-  .app-old-mirror .metrics-grid,
-  .app-old-mirror .old-kpi-grid,
-  .app-old-mirror .vehicle-kpi-grid,
-  .app-old-mirror .household-summary-grid,
-  .app-old-mirror .coach-summary-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-  }
-}
-
-@media (max-width: 1280px) {
+/* Corrección principal: en tablet/móvil el menú NO puede ser sticky ni forzar scroll al inicio. */
+@media (max-width: 1180px) {
   .app.app-sidebar.app-old-mirror {
-    grid-template-columns: 1fr !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
   }
 
-  .app-old-mirror .side-nav.old-side,
-  .app-old-mirror .old-side {
-    position: sticky !important;
-    top: 0 !important;
-    z-index: 60 !important;
-    width: 100% !important;
+  .app-old-mirror .old-side,
+  .app-old-mirror .side-nav.old-side {
+    position: static !important;
+    top: auto !important;
     height: auto !important;
     min-height: 0 !important;
     max-height: none !important;
-    border-right: 0 !important;
-    border-bottom: 1px solid var(--f360-border) !important;
-    border-radius: 0 0 28px 28px !important;
-    padding: 14px max(16px, env(safe-area-inset-left)) 12px max(16px, env(safe-area-inset-right)) !important;
-    gap: 12px !important;
+    width: 100% !important;
+    max-width: 100% !important;
     overflow: visible !important;
-  }
-
-  .app-old-mirror .old-side-brand {
-    grid-template-columns: 42px minmax(0, 1fr) !important;
-    padding: 0 !important;
-  }
-
-  .app-old-mirror .old-side-brand .brand-logo {
-    width: 42px !important;
-    height: 42px !important;
-  }
-
-  .app-old-mirror .side-household-name,
-  .app-old-mirror .side-switch {
-    display: none !important;
-  }
-
-  .app-old-mirror .side-menu-title,
-  .app-old-mirror .side-divider {
-    display: none !important;
+    border-radius: 0 0 26px 26px !important;
+    z-index: 5 !important;
   }
 
   .app-old-mirror .old-menu {
-    display: flex !important;
-    flex-wrap: nowrap !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 10px !important;
-    overflow-x: auto !important;
-    padding: 2px 2px 8px !important;
-    scroll-snap-type: x proximity;
-    scrollbar-width: thin;
+    overflow: visible !important;
+    max-width: 100% !important;
   }
 
   .app-old-mirror .old-menu button {
-    flex: 0 0 auto !important;
-    min-width: 138px !important;
-    max-width: 178px !important;
-    grid-template-columns: 32px minmax(0, 1fr) !important;
-    scroll-snap-align: start !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    justify-content: start !important;
+    text-align: left !important;
+  }
+
+  .app-old-mirror .old-menu button b,
+  .app-old-mirror .old-side-brand h1,
+  .app-old-mirror .side-user strong,
+  .app-old-mirror .side-user span {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
     white-space: nowrap !important;
   }
 
-  .app-old-mirror .old-menu button b {
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-  }
-
-  .app-old-mirror .side-footer {
-    display: grid !important;
-    grid-template-columns: minmax(0, 1fr) auto auto auto !important;
-    gap: 8px !important;
-    padding-top: 0 !important;
-    border-top: 0 !important;
-  }
-
-  .app-old-mirror .side-footer .btn {
-    width: auto !important;
-    min-width: 0 !important;
-    padding-inline: 12px !important;
-  }
-
   .app-old-mirror .content-area.old-content {
-    padding: 26px clamp(16px, 3vw, 32px) 92px !important;
-  }
-
-  .app-old-mirror .period-grid.old-period-grid,
-  .app-old-mirror .old-period-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  }
-
-  .app-old-mirror .quick-actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  }
-
-  .app-old-mirror .metrics-grid,
-  .app-old-mirror .old-kpi-grid,
-  .app-old-mirror .vehicle-kpi-grid,
-  .app-old-mirror .household-summary-grid,
-  .app-old-mirror .coach-summary-grid,
-  .app-old-mirror .indicator-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow: visible !important;
+    padding: clamp(14px, 2.6vw, 24px) !important;
   }
 
   .app-old-mirror .grid-main,
@@ -11891,40 +11395,33 @@ body {
 }
 
 @media (max-width: 760px) {
-  .app-old-mirror {
-    --ux-gap-md: 14px;
-    --ux-gap-lg: 18px;
-    --ux-gap-xl: 22px;
-    --ux-radius-card: 24px;
+  :root {
+    --f360-safe-touch: 48px;
+    --f360-safe-card-pad: 16px;
+    --f360-safe-gap: 14px;
   }
 
-  .app-old-mirror .side-nav.old-side,
-  .app-old-mirror .old-side {
-    padding: 12px 12px 10px !important;
+  .app-old-mirror .old-side,
+  .app-old-mirror .side-nav.old-side {
+    padding: 12px !important;
     border-radius: 0 0 22px 22px !important;
   }
 
-  .app-old-mirror .old-side-brand h1 {
-    font-size: .78rem !important;
-  }
-
-  .app-old-mirror .old-side-brand span {
-    display: none !important;
+  .app-old-mirror .old-menu {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 9px !important;
   }
 
   .app-old-mirror .old-menu button {
-    min-width: 118px !important;
-    max-width: 148px !important;
-    min-height: 44px !important;
-    padding: 8px 10px !important;
-    grid-template-columns: 30px minmax(0, 1fr) !important;
+    min-height: 48px !important;
+    padding: 9px 10px !important;
     border-radius: 16px !important;
   }
 
   .app-old-mirror .old-menu button span {
     width: 30px !important;
     height: 30px !important;
-    border-radius: 12px !important;
+    min-width: 30px !important;
   }
 
   .app-old-mirror .old-menu button b {
@@ -11932,7 +11429,9 @@ body {
   }
 
   .app-old-mirror .side-footer {
+    display: grid !important;
     grid-template-columns: 1fr 1fr !important;
+    gap: 9px !important;
   }
 
   .app-old-mirror .side-user {
@@ -11940,80 +11439,35 @@ body {
     min-width: 0 !important;
   }
 
-  .app-old-mirror .side-footer .btn {
+  .app-old-mirror .side-footer .btn,
+  .app-old-mirror .side-footer button {
     width: 100% !important;
     justify-content: center !important;
   }
 
-  .app-old-mirror .side-footer .btn.ghost {
-    grid-column: 1 / -1 !important;
-  }
-
-  .app-old-mirror .content-area.old-content {
-    padding: 20px 12px 86px !important;
-  }
-
   .app-old-mirror .section-header,
   .app-old-mirror .page-head,
-  .app-old-mirror .old-title-row,
-  .app-old-mirror .section-card,
-  .app-old-mirror .card,
-  .app-old-mirror .old-period .quick-period-card,
-  .app-old-mirror .old-period .month-history-card,
-  .app-old-mirror .analytics-toolbar.old-analysis,
-  .app-old-mirror .coach-panel,
-  .app-old-mirror .finance-command-center,
-  .app-old-mirror .monthly-contribution-card,
-  .app-old-mirror .house-pot-card {
-    padding: 18px !important;
-  }
-
-  .app-old-mirror .section-icon-row {
-    grid-template-columns: 44px minmax(0, 1fr) !important;
-    gap: 12px !important;
-  }
-
-  .app-old-mirror .section-badge {
-    width: 44px !important;
-    height: 44px !important;
-    border-radius: 16px !important;
+  .app-old-mirror .old-title-row {
+    margin-bottom: 0 !important;
   }
 
   .app-old-mirror .section-header h3,
   .app-old-mirror .page-head h2,
   .app-old-mirror .old-title-row h3 {
-    font-size: clamp(1.6rem, 8.8vw, 2.35rem) !important;
-    line-height: 1.03 !important;
+    font-size: clamp(1.55rem, 8vw, 2.25rem) !important;
+    letter-spacing: -0.045em !important;
   }
 
-  .app-old-mirror .section-header p,
-  .app-old-mirror .page-head p,
-  .app-old-mirror .old-title-row p {
-    font-size: .94rem !important;
-  }
-
-  .app-old-mirror .app-section-guide {
-    margin-top: -10px !important;
-    grid-template-columns: 1fr !important;
-    padding: 13px 14px !important;
-  }
-
-  .app-old-mirror .app-section-guide span {
-    display: none !important;
-  }
-
-  .app-old-mirror .period-grid.old-period-grid,
-  .app-old-mirror .old-period-grid,
-  .app-old-mirror .quick-actions,
   .app-old-mirror .metrics-grid,
   .app-old-mirror .old-kpi-grid,
   .app-old-mirror .vehicle-kpi-grid,
   .app-old-mirror .household-summary-grid,
   .app-old-mirror .coach-summary-grid,
   .app-old-mirror .indicator-grid,
+  .app-old-mirror .period-grid.old-period-grid,
+  .app-old-mirror .old-period-grid,
+  .app-old-mirror .quick-actions,
   .app-old-mirror .inline-grid,
-  .app-old-mirror .finance-coach-controls,
-  .app-old-mirror .analytics-controls-pro,
   .app-old-mirror .filters,
   .app-old-mirror .filters-grid,
   .app-old-mirror .dashboard-filters,
@@ -12022,139 +11476,30 @@ body {
     grid-template-columns: 1fr !important;
   }
 
-  .app-old-mirror .metric,
-  .app-old-mirror .old-kpi,
-  .app-old-mirror .household-kpi,
-  .app-old-mirror .coach-kpi,
-  .app-old-mirror .indicator-grid > div {
-    min-height: 112px !important;
-  }
-
-  .app-old-mirror .metric strong,
-  .app-old-mirror .old-kpi strong,
-  .app-old-mirror .household-kpi strong,
-  .app-old-mirror .coach-kpi strong,
-  .app-old-mirror .indicator-grid strong {
-    font-size: clamp(1.45rem, 8.5vw, 2.15rem) !important;
-  }
-
-  .app-old-mirror table.f360-responsive-table,
-  .app-old-mirror .f360-responsive-table thead,
-  .app-old-mirror .f360-responsive-table tbody,
-  .app-old-mirror .f360-responsive-table tr,
-  .app-old-mirror .f360-responsive-table th,
-  .app-old-mirror .f360-responsive-table td {
-    display: block !important;
-    min-width: 0 !important;
-  }
-
-  .app-old-mirror .f360-responsive-table {
-    min-width: 0 !important;
-    width: 100% !important;
-  }
-
-  .app-old-mirror .f360-responsive-table thead {
-    position: absolute !important;
-    width: 1px !important;
-    height: 1px !important;
-    overflow: hidden !important;
-    clip: rect(0 0 0 0) !important;
-  }
-
-  .app-old-mirror .f360-responsive-table tbody {
-    display: grid !important;
-    gap: 12px !important;
-    padding: 12px !important;
-  }
-
-  .app-old-mirror .f360-responsive-table tr {
-    border: 1px solid var(--f360-border) !important;
-    border-radius: 20px !important;
-    background: var(--ux-surface-muted) !important;
-    box-shadow: var(--ux-card-shadow-soft) !important;
-    overflow: hidden !important;
-  }
-
-  .app-old-mirror .f360-responsive-table td {
-    display: grid !important;
-    grid-template-columns: minmax(110px, 38%) minmax(0, 1fr) !important;
-    gap: 10px !important;
-    align-items: start !important;
-    padding: 12px 14px !important;
-    border-bottom: 1px solid rgba(127,137,154,.13) !important;
-    text-align: right !important;
-  }
-
-  .app-old-mirror .f360-responsive-table td:last-child {
-    border-bottom: 0 !important;
-  }
-
-  .app-old-mirror .f360-responsive-table td::before {
-    content: attr(data-label) !important;
-    text-align: left !important;
-    color: var(--f360-muted) !important;
-    font-size: .78rem !important;
-    font-weight: 950 !important;
-  }
-
-  .app-old-mirror .f360-responsive-table .td-actions {
-    justify-content: end !important;
-  }
-
-  .app-old-mirror .chart-bars {
-    min-height: 220px !important;
-    overflow-x: auto !important;
+  .app-old-mirror input,
+  .app-old-mirror select,
+  .app-old-mirror textarea {
+    font-size: 16px !important;
   }
 }
 
 @media (max-width: 430px) {
-  .app-old-mirror .content-area.old-content {
-    padding-inline: 10px !important;
+  .app-old-mirror .old-menu {
+    grid-template-columns: 1fr !important;
   }
 
-  .app-old-mirror .section-header,
-  .app-old-mirror .page-head,
-  .app-old-mirror .old-title-row,
+  .app-old-mirror .content-area.old-content {
+    padding: 10px !important;
+  }
+
   .app-old-mirror .section-card,
   .app-old-mirror .card,
-  .app-old-mirror .old-period .quick-period-card,
-  .app-old-mirror .old-period .month-history-card,
-  .app-old-mirror .analytics-toolbar.old-analysis,
+  .app-old-mirror .monthly-contribution-card,
+  .app-old-mirror .house-pot-card,
   .app-old-mirror .coach-panel,
   .app-old-mirror .finance-command-center,
-  .app-old-mirror .monthly-contribution-card,
-  .app-old-mirror .house-pot-card {
-    padding: 15px !important;
-    border-radius: 21px !important;
-  }
-
-  .app-old-mirror .old-menu button {
-    min-width: 104px !important;
-    max-width: 124px !important;
-  }
-
-  .app-old-mirror .old-menu button b {
-    font-size: .72rem !important;
-  }
-
-  .app-old-mirror .f360-responsive-table td {
-    grid-template-columns: 1fr !important;
-    text-align: left !important;
+  .app-old-mirror .analytics-toolbar.old-analysis {
+    padding: 14px !important;
+    border-radius: 20px !important;
   }
 }
-
-@media (prefers-reduced-motion: reduce) {
-  html {
-    scroll-behavior: auto !important;
-  }
-
-  .app-old-mirror *,
-  .app-old-mirror *::before,
-  .app-old-mirror *::after {
-    animation-duration: .001ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-    transition-duration: .001ms !important;
-  }
-}
-
