@@ -887,6 +887,7 @@ function passwordFieldHtml(name = "password", placeholder = "mínimo 6 caractere
 }
 
 function renderAuth() {
+  state.authMode = "login";
   app.className = "app-shell";
   app.innerHTML = `
     <section class="auth-wrap">
@@ -895,22 +896,19 @@ function renderAuth() {
         <h1>Finanzas 360 Real.</h1>
       </div>
       <div class="auth-card">
-        <div class="auth-tabs">
-          <button class="btn ${state.authMode === "login" ? "active dark" : "ghost"}" data-auth-mode="login" type="button">Entrar</button>
-          <button class="btn ${state.authMode === "signup" ? "active dark" : "ghost"}" data-auth-mode="signup" type="button">Crear cuenta</button>
+        <div class="auth-tabs single">
+          <button class="btn active dark" type="button">Entrar</button>
         </div>
         <form id="authForm">
-          ${state.authMode === "signup" ? `<div class="field"><label>Nombre</label><input name="full_name" placeholder="Ej. Alberto" autocomplete="name" required /></div>` : ""}
           <div class="field"><label>Email</label><input name="email" type="email" placeholder="correo@dominio.com" autocomplete="email" required /></div>
           ${passwordFieldHtml("password")}
-          <button class="btn primary block" type="submit">${state.authMode === "login" ? "Entrar a mi hogar" : "Crear mi usuario"}</button>
+          <button class="btn primary block" type="submit">Entrar a mi hogar</button>
           <div id="authMessage" class="auth-message" role="alert" aria-live="polite" ${state.authError ? "" : "hidden"}>${escapeHtml(state.authError)}</div>
         </form>
-        <p class="hint">La primera persona que crea el hogar queda como administrador. Luego puede invitar familiares y definir permisos.</p>
+        <p class="hint">El acceso lo entrega el administrador. Los integrantes no crean cuentas desde esta pantalla.</p>
       </div>
     </section>
   `;
-  $$('[data-auth-mode]').forEach(btn => btn.addEventListener("click", () => { state.authMode = btn.dataset.authMode; state.authError = ""; renderAuth(); }));
   bindPasswordToggles();
   $("#authForm").addEventListener("submit", handleAuth);
 }
@@ -946,19 +944,12 @@ async function handleAuth(event) {
 
   try {
     if (state.authMode === "signup") {
-      const fullName = String(f.get("full_name") || "").trim();
-      const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } });
-      if (error) return setAuthError(friendlyAuthMessage(error, "signup"));
-      showToast("Usuario creado. Si Supabase pide confirmar correo, revisa Gmail. Luego entra con tu usuario.", "ok");
-      state.authMode = "login";
-      state.authError = "";
-      renderAuth();
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) return setAuthError(friendlyAuthMessage(error, "login"));
-      clearAuthError();
-      showToast("Sesión iniciada.", "ok");
+      return setAuthError("La creación pública de usuarios está desactivada. Pídele al administrador tu usuario y contraseña.");
     }
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return setAuthError(friendlyAuthMessage(error, "login"));
+    clearAuthError();
+    showToast("Sesión iniciada.", "ok");
   } catch (error) {
     setAuthError(friendlyAuthMessage(error, state.authMode));
   } finally {
@@ -1439,7 +1430,35 @@ function renderBackup() {
 
 function renderAdmin() {
   if (!isAdmin()) return `<div class="empty-state"><strong>Sin permiso</strong>Solo el administrador puede entrar aquí.</div>`;
-  return `<section class="page-head"><h2>Administrador</h2><p>Invita integrantes y define qué puede ver o tocar cada usuario.</p></section><section class="admin-stack"><article class="section-card admin-invite-card"><h4>Invitar integrante</h4><form id="inviteForm"><div class="field"><label>Email</label><input name="email" type="email" required placeholder="correo@dominio.com" /></div><div class="field"><label>Nombre opcional</label><input name="full_name" placeholder="Ej. Mercedes" /></div><div class="field"><label>Rol</label><select name="role"><option value="member">Miembro</option><option value="viewer">Solo lectura</option><option value="admin">Administrador</option></select></div><button class="btn primary" type="submit">Crear invitación</button></form><h4 style="margin-top:20px">Invitaciones</h4>${state.invitations.length ? `<div class="form-grid">${state.invitations.map(i => `<div class="progress-row"><div class="progress-meta"><strong>${escapeHtml(i.invited_email)}</strong><span>${escapeHtml(i.status)} · ${escapeHtml(i.role)}</span></div></div>`).join("")}</div>` : `<div class="empty-state"><strong>Sin invitaciones</strong>Invita a alguien por email.</div>`}</article><article class="section-card admin-members-card"><h4>Miembros</h4>${renderMembersAdmin()}</article></section><article class="section-card admin-permissions-card"><h4>Permisos por usuario</h4><div class="field"><label>Seleccionar usuario</label><select id="permissionUserSelect">${visibleMembers(true).map(m => `<option value="${m.user_id}">${escapeHtml(memberName(m.user_id))} · ${escapeHtml(m.role)}</option>`).join("")}</select></div><div id="permissionsEditor" style="margin-top:14px"></div></article>`;
+  return `<section class="page-head"><h2>Administrador</h2><p>Crea accesos, asigna contraseñas y define qué puede ver o tocar cada integrante. Los usuarios ya no se registran solos.</p></section>
+  <section class="admin-stack">
+    <article class="section-card admin-invite-card admin-create-user-card">
+      <h4>Crear usuario de integrante</h4>
+      <p class="sub">Aquí el admin crea el email y la contraseña temporal. Copia la contraseña antes de guardar y entrégasela a la persona por privado.</p>
+      <form id="adminCreateUserForm">
+        <div class="inline-grid">
+          <div class="field"><label>Nombre visible</label><input name="full_name" required placeholder="Ej. Mercedes" autocomplete="off" /></div>
+          <div class="field"><label>Email / usuario</label><input name="email" type="email" required placeholder="correo@dominio.com" autocomplete="off" /></div>
+        </div>
+        <div class="inline-grid">
+          <div class="field password-field"><label>Contraseña temporal</label><div class="password-wrap"><input name="password" type="password" required minlength="6" placeholder="mínimo 6 caracteres" autocomplete="new-password" /><button type="button" class="password-toggle" aria-label="Ver contraseña" title="Ver contraseña">👁️</button></div><p class="hint">No se guarda visible en la app. Cópiala antes de crear el usuario.</p></div>
+          <div class="field"><label>Rol</label><select name="role"><option value="member">Miembro</option><option value="viewer">Solo lectura</option><option value="admin">Administrador</option></select></div>
+        </div>
+        <div class="inline-grid">
+          <div class="field"><label>Estado inicial</label><select name="status"><option value="active">Activo</option><option value="disabled">Inactivo</option></select></div>
+          <div class="field"><label>% participación sugerido</label><input name="participation_percent" type="number" step="0.01" placeholder="Opcional" /></div>
+        </div>
+        <div class="inline-grid">
+          <div class="field"><label>Tipo de hogar</label><select name="household_type"><option value="family">Familia</option><option value="shared">Piso compartido</option><option value="couple">Pareja</option><option value="single">Una persona</option></select></div>
+          <label class="switch-row"><span><strong>Es dependiente</strong><br><span class="hint">Úsalo para menores o personas que no aportan.</span></span><input name="dependent" type="checkbox" /></label>
+        </div>
+        <div class="form-actions"><button class="btn ghost" type="button" data-generate-password>Generar contraseña</button><button class="btn primary" type="submit">Crear usuario y acceso</button></div>
+      </form>
+      <div class="setup-note"><strong>Importante:</strong> esta acción usa una Edge Function segura de Supabase. La service role key nunca debe ir en el navegador.</div>
+    </article>
+    <article class="section-card admin-members-card"><h4>Miembros</h4><p class="sub">Activa, desactiva o edita integrantes existentes.</p>${renderMembersAdmin()}</article>
+  </section>
+  <article class="section-card admin-permissions-card"><h4>Permisos por usuario</h4><p class="sub">Después de crear el usuario, ajusta sus permisos por módulo.</p><div class="field"><label>Seleccionar usuario</label><select id="permissionUserSelect">${visibleMembers(true).map(m => `<option value="${m.user_id}">${escapeHtml(memberName(m.user_id))} · ${escapeHtml(m.role)}</option>`).join("")}</select></div><div id="permissionsEditor" style="margin-top:14px"></div></article>`;
 }
 
 function renderMembersAdmin() {
@@ -1665,12 +1684,74 @@ async function handleVehicleRecordSubmit(event) {
   await loadHouseholdData(); renderApp();
 }
 
-async function handleInviteSubmit(event) {
+function generateTemporaryPassword() {
+  const words = ["Casa", "Pote", "Familia", "Ahorro", "Luz", "Gas", "Meta", "Fondo"];
+  const word = words[Math.floor(Math.random() * words.length)];
+  const number = Math.floor(1000 + Math.random() * 9000);
+  const symbol = ["!", "#", "?", "*"][Math.floor(Math.random() * 4)];
+  return `${word}${number}${symbol}`;
+}
+
+async function handleCreateMemberAccountSubmit(event) {
   event.preventDefault();
-  if (!isAdmin()) return showToast("Solo el admin puede invitar.", "danger");
-  const f = new FormData(event.currentTarget);
-  await withError(supabase.from("invitations").insert({ household_id: state.currentHouseholdId, invited_email: String(f.get("email") || "").trim().toLowerCase(), full_name: String(f.get("full_name") || "").trim(), role: f.get("role"), invited_by: state.user.id, status: "pending" }), "Invitación creada. Esa persona debe registrarse con ese email.");
-  await loadHouseholdData(); renderApp();
+  if (!isAdmin()) return showToast("Solo el admin puede crear usuarios.", "danger");
+  const form = event.currentTarget;
+  const f = new FormData(form);
+  const email = String(f.get("email") || "").trim().toLowerCase();
+  const password = String(f.get("password") || "");
+  const fullName = String(f.get("full_name") || "").trim();
+  const role = String(f.get("role") || "member");
+  const status = String(f.get("status") || "active");
+  const dependent = Boolean(f.get("dependent"));
+  const participationRaw = String(f.get("participation_percent") || "").trim();
+
+  if (!email || !password || !fullName) return showToast("Completa nombre, email y contraseña.", "danger");
+  if (password.length < 6) return showToast("La contraseña debe tener mínimo 6 caracteres.", "danger");
+  if (!state.currentHouseholdId) return showToast("No hay hogar activo.", "danger");
+
+  const submitBtn = form.querySelector('button[type="submit"]');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.dataset.originalText = submitBtn.textContent;
+    submitBtn.textContent = "Creando usuario…";
+  }
+
+  try {
+    const { data, error } = await supabase.functions.invoke("create-member-account", {
+      body: {
+        household_id: state.currentHouseholdId,
+        email,
+        password,
+        full_name: fullName,
+        role,
+        status,
+        household_type: String(f.get("household_type") || "family"),
+        participation_percent: participationRaw === "" ? null : parseAmount(participationRaw),
+        dependent
+      }
+    });
+
+    if (error) {
+      const details = error?.context?.error_description || error?.message || "Edge Function no disponible";
+      throw new Error(details);
+    }
+
+    showToast(data?.updated_existing ? "Usuario actualizado y vinculado al hogar." : "Usuario creado y vinculado al hogar.", "ok");
+    form.reset();
+    await loadHouseholdData();
+    renderApp();
+  } catch (error) {
+    showToast(`No pude crear el usuario: ${error?.message || error}. Revisa que la Edge Function create-member-account esté desplegada.`, "danger");
+  } finally {
+    if (submitBtn && document.body.contains(submitBtn)) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = submitBtn.dataset.originalText || "Crear usuario y acceso";
+    }
+  }
+}
+
+async function handleInviteSubmit(event) {
+  return handleCreateMemberAccountSubmit(event);
 }
 
 async function handleSavePermissions(event) {
@@ -2431,23 +2512,25 @@ const F360V3 = (() => {
   }
 
   function renderMembersSection() {
-    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🏠</div><div><h3>Miembros del hogar</h3><p>Administra integrantes, roles y participación. Los ingresos reales se registran desde la sección Registrar.</p></div></div></section>
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🏠</div><div><h3>Miembros del hogar</h3><p>Administra integrantes, roles y participación. Los usuarios nuevos se crean únicamente desde Admin.</p></div></div></section>
     <section class="members-grid">
-      <article class="section-card"><h4 id="memberFormTitle">Nuevo miembro / invitación</h4>
+      <article class="section-card"><h4 id="memberFormTitle">Editar miembro</h4>
+        <p class="sub">Para cambiar nombre visible, rol, estado o participación pulsa Editar sobre una persona. Para crear un usuario con contraseña usa la pestaña Admin.</p>
         <form id="memberForm">
           <input name="member_id" type="hidden" />
           <div class="field"><label>Tipo de hogar</label><select name="household_type"><option value="family">Familia</option><option value="shared">Piso compartido</option><option value="couple">Pareja</option><option value="single">Una persona</option></select></div>
           <div class="field"><label>Nombre visible</label><input name="full_name" placeholder="Ej. Mercedes" /></div>
-          <div class="field"><label>Email para invitar</label><input name="email" type="email" placeholder="correo@dominio.com" /><p class="hint">Para editar un miembro existente no hace falta cambiar el email. El nombre visible se guarda en el hogar.</p></div>
+          <div class="field"><label>Email</label><input name="email" type="email" disabled placeholder="Se muestra al editar" /><p class="hint">El email de acceso se crea desde Admin y no se cambia desde aquí.</p></div>
           <div class="inline-grid"><div class="field"><label>% participación sugerido</label><input name="participation_percent" type="number" step="0.01" placeholder="Ej. 50" /></div><div class="field"><label>Rol de acceso</label><select name="role"><option value="member">Miembro</option><option value="viewer">Solo lectura</option><option value="admin">Administrador</option></select></div></div>
           <div class="field"><label>Estado</label><select name="status"><option value="active">Activo</option><option value="disabled">Inactivo</option></select></div>
           <label class="switch-row"><span>Es dependiente</span><input name="dependent" type="checkbox" /></label>
-          <div class="form-actions"><button class="btn primary" type="submit" id="saveMemberBtn">Guardar / invitar</button><button class="btn ghost hidden" type="button" id="cancelMemberEdit">Cancelar edición</button></div>
+          <div class="form-actions"><button class="btn primary" type="submit" id="saveMemberBtn">Actualizar miembro</button><button class="btn ghost hidden" type="button" id="cancelMemberEdit">Cancelar edición</button><button class="btn dark" type="button" data-section="admin">Crear usuario nuevo</button></div>
         </form>
       </article>
       <article class="section-card"><h4>Personas registradas</h4>${renderMembersAdmin()}</article>
     </section>`;
   }
+
 
   function renderCategories() {
     return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🏷️</div><div><h3>Categorías y presupuestos</h3><p>Organiza ingresos y gastos con presupuesto mensual para detectar excesos.</p></div></div></section><section class="categories-grid"><article class="section-card"><h4 id="categoryFormTitle">Nueva categoría</h4><form id="categoryForm"><input name="id" type="hidden" /><div class="field"><label>Nombre</label><input name="name" required placeholder="Ej. Mascotas" /></div><div class="inline-grid"><div class="field"><label>Tipo</label><select name="type"><option value="expense">Gasto</option><option value="income">Ingreso</option><option value="both">Ambos</option></select></div><div class="field"><label>Presupuesto mensual</label><input name="budget" type="number" step="0.01" placeholder="Solo gastos" /></div></div><div class="field"><label>Color</label><input name="color" type="color" value="#4aa8ff" /></div><div class="form-actions"><button class="btn primary" id="saveCategoryBtn" type="submit">Guardar categoría</button><button class="btn ghost" type="button" id="cancelCategoryEdit" hidden>Cancelar edición</button></div></form></article><article class="section-card"><h4>Listado de categorías</h4>${state.categories.length ? `<div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Tipo</th><th>Presupuesto</th><th>Color</th><th>Acciones</th></tr></thead><tbody>${state.categories.map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.type)}</td><td>${money(c.budget || 0)}</td><td><span class="tag" style="background:${escapeHtml(c.color || '#4aa8ff')};color:white">${escapeHtml(c.color || '')}</span></td><td><div class="td-actions"><button class="btn small" data-edit-category="${c.id}">Editar</button><button class="btn small danger" data-delete-category="${c.id}">Borrar</button></div></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>Sin categorías</strong>Crea tus primeras categorías.</div>`}</article></section>`;
@@ -2778,7 +2861,9 @@ const F360V3 = (() => {
     document.getElementById('vehicleForm')?.addEventListener('submit', handleVehicleSubmit);
     document.getElementById('vehicleInsuranceForm')?.addEventListener('submit', handleVehicleInsuranceSubmit);
     document.getElementById('vehicleRecordForm')?.addEventListener('submit', handleVehicleRecordSubmit);
-    document.getElementById('inviteForm')?.addEventListener('submit', handleInviteSubmit);
+    document.getElementById('adminCreateUserForm')?.addEventListener('submit', handleCreateMemberAccountSubmit);
+    document.querySelector('[data-generate-password]')?.addEventListener('click', () => { const input = document.querySelector('#adminCreateUserForm [name="password"]'); if (input) { input.value = generateTemporaryPassword(); input.type = 'text'; input.focus(); } });
+    bindPasswordToggles();
     document.getElementById('exportJsonBtn')?.addEventListener('click', exportJson);
     document.getElementById('exportCsvBtn')?.addEventListener('click', exportCsv);
     document.querySelectorAll('[data-delete-movement]').forEach(btn => btn.addEventListener('click', () => deleteMovement(btn.dataset.deleteMovement)));
@@ -2918,18 +3003,7 @@ const F360V3 = (() => {
       return;
     }
 
-    const email = String(f.get("email") || "").trim().toLowerCase();
-    if (!email) return showToast("Coloca un email para invitar a ese integrante, o pulsa Editar sobre uno existente.", "danger");
-    await withError(supabase.from("invitations").upsert({
-      household_id: state.currentHouseholdId,
-      invited_email: email,
-      full_name: displayName,
-      role: payload.role,
-      invited_by: state.user.id,
-      status: "pending"
-    }, { onConflict: "household_id,invited_email" }), "Invitación guardada. Esa persona debe registrarse con ese email.");
-    await loadHouseholdData();
-    renderApp();
+    return showToast("Para crear usuarios nuevos ve a Admin y asigna email + contraseña. Esta sección solo edita miembros existentes.", "danger");
   }
 
   async function handleCategorySubmit(event) {

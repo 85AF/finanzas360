@@ -9413,3 +9413,23 @@ body[data-f360-theme="dark"] .app-old-mirror .history-category-row {
     justify-content: space-between !important;
   }
 }
+
+/* Admin: creación cerrada de usuarios por el administrador */
+.auth-tabs.single {
+  grid-template-columns: 1fr;
+}
+.admin-create-user-card .setup-note {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.48);
+  background: rgba(255,255,255,.34);
+  color: var(--muted, #5f6f8f);
+  font-size: .92rem;
+  line-height: 1.45;
+}
+html[data-f360-theme="dark"] .admin-create-user-card .setup-note,
+body[data-f360-theme="dark"] .admin-create-user-card .setup-note {
+  border-color: rgba(255,255,255,.08);
+  background: rgba(255,255,255,.045);
+}
