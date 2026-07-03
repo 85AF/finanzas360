@@ -568,6 +568,63 @@ async function insertWithSchemaFallback(table, payload, successMessage, fallback
   throw error;
 }
 
+
+async function updateWithSchemaFallback(table, payload, filters, successMessage, fallbackFields = []) {
+  const runUpdate = async (body) => {
+    let query = supabase.from(table).update(body);
+    Object.entries(filters || {}).forEach(([key, value]) => { query = query.eq(key, value); });
+    return await query;
+  };
+
+  const { data, error } = await runUpdate(payload);
+  if (!error) {
+    if (successMessage) showToast(successMessage, "ok");
+    return data;
+  }
+
+  const raw = String(error.message || "").toLowerCase();
+  const looksLikeMissingColumn = raw.includes("column") || raw.includes("schema cache") || raw.includes("could not find") || raw.includes("does not exist");
+  if (looksLikeMissingColumn && fallbackFields.length) {
+    const fallback = {};
+    fallbackFields.forEach(key => {
+      if (Object.prototype.hasOwnProperty.call(payload, key)) fallback[key] = payload[key];
+    });
+    const retry = await runUpdate(fallback);
+    if (!retry.error) {
+      console.warn(`Update ${table} guardado con esquema base. Ejecuta los upgrades SQL para activar todos los campos.`, error.message);
+      if (successMessage) showToast(`${successMessage} Revisa SQL upgrades si faltan campos avanzados.`, "ok");
+      return retry.data;
+    }
+    console.error(retry.error);
+    showToast(retry.error.message || "Ocurrió un error", "danger");
+    throw retry.error;
+  }
+
+  console.error(error);
+  showToast(error.message || "Ocurrió un error", "danger");
+  throw error;
+}
+
+function setFormField(form, name, value) {
+  const field = form?.elements?.[name];
+  if (!field) return;
+  if (field.type === "checkbox") {
+    field.checked = value === true || value === "true" || value === 1 || value === "1";
+    return;
+  }
+  field.value = value ?? "";
+}
+
+function setSelectField(form, name, value) {
+  const field = form?.elements?.[name];
+  if (!field) return;
+  const raw = value ?? "";
+  if (raw && ![...field.options].some(option => String(option.value) === String(raw))) {
+    field.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(raw)}">${escapeHtml(raw)}</option>`);
+  }
+  field.value = raw;
+}
+
 async function init() {
   if (!isSupabaseConfigured()) {
     app.innerHTML = document.getElementById("config-warning-template").innerHTML;
@@ -960,7 +1017,7 @@ function renderMovementTable(items, actions = true) {
         const typeLabel = isVehicle ? "Vehículo" : isRecurring ? (x.type === "income" ? "Ingreso recurrente" : "Gasto recurrente") : x.type === "income" ? "Ingreso" : "Gasto";
         const typeClass = x.type === "income" ? "income" : "expense";
         const actionCell = !actions ? "" : isVehicle
-          ? `<td><div class="td-actions"><button class="btn small" data-section="vehicles">Ver vehículo</button><button class="btn small danger" data-delete-vehicle-record="${x._vehicle_record_id}">Borrar</button></div></td>`
+          ? `<td><div class="td-actions"><button class="btn small" data-edit-vehicle-record="${x._vehicle_record_id}">Editar</button><button class="btn small" data-section="vehicles">Ver vehículo</button><button class="btn small danger" data-delete-vehicle-record="${x._vehicle_record_id}">Borrar</button></div></td>`
           : isRecurring
             ? `<td><div class="td-actions"><button class="btn small" data-section="register">Ver automático</button><button class="btn small danger" data-delete-recurring="${x._recurring_id}">Borrar automático</button></div></td>`
             : `<td><div class="td-actions"><button class="btn small" data-edit-movement="${x.id}">Editar</button><button class="btn small danger" data-delete-movement="${x.id}">Borrar</button></div></td>`;
@@ -1120,13 +1177,14 @@ function renderVehicles() {
 
 function renderVehicleForm() {
   return `<form id="vehicleForm">
+    <input name="id" type="hidden" />
     <div class="field"><label>Nombre o alias</label><input name="name" required placeholder="Ej. Peugeot 308, Corolla, Burgman" /></div>
     <div class="inline-grid"><div class="field"><label>Tipo</label><select name="type"><option value="car">Coche</option><option value="motorcycle">Moto</option><option value="van">Furgoneta</option><option value="truck">Camión</option><option value="other">Otro</option></select></div><div class="field"><label>Responsable / propietario</label><select name="owner_id">${memberOptions(state.user.id)}</select></div></div>
     <div class="inline-grid"><div class="field"><label>Marca</label><input name="brand" placeholder="Ej. Peugeot, Toyota, Benelli" /></div><div class="field"><label>Modelo</label><input name="model" placeholder="Ej. 308, Corolla, Leoncino" /></div></div>
     <div class="inline-grid"><div class="field"><label>Matrícula</label><input name="plate" placeholder="Ej. 3979 JBC" /></div><div class="field"><label>Año</label><input name="year" type="number" min="1950" max="2100" placeholder="Ej. 2014" /></div></div>
     <div class="inline-grid"><div class="field"><label>Kilometraje actual</label><input name="km" type="number" min="0" placeholder="Ej. 120000" /></div><div class="field"><label>Estado</label><select name="status"><option value="activo">Activo</option><option value="vendido">Vendido</option><option value="taller">En taller</option><option value="inactivo">Inactivo</option></select></div></div>
     <div class="field"><label>Notas</label><textarea name="notes" placeholder="Seguro, uso, observaciones, taller habitual..."></textarea></div>
-    <button class="btn primary" type="submit">Guardar vehículo</button>
+    <div class="form-actions"><button class="btn primary" id="saveVehicleBtn" type="submit">Guardar vehículo</button><button class="btn ghost" type="button" id="cancelVehicleEdit" hidden>Cancelar edición</button></div>
   </form>`;
 }
 
@@ -1136,7 +1194,7 @@ function renderVehicleList() {
     const spent = vehicleTotalSpent(v.id, activeYear());
     const records = vehicleRecordsFor(v.id);
     const next = vehicleNextAlerts(50).find(a => a.vehicle.id === v.id);
-    return `<article class="vehicle-card"><header><div><h5>${vehicleTypeIcon(v.type)} ${escapeHtml(v.name)}</h5><p class="muted">${escapeHtml([v.brand, v.model, v.year, v.plate].filter(Boolean).join(" · ") || "Sin datos técnicos")}</p></div><span class="vehicle-chip ${v.status === "activo" || !v.status ? "ok" : "warn"}">${escapeHtml(v.status || "activo")}</span></header><div class="vehicle-meta-grid"><div class="mini-stat"><span>Kilómetros</span><strong>${v.km ? Number(v.km).toLocaleString("es-ES") : "-"}</strong></div><div class="mini-stat"><span>Gasto ${activeYear()}</span><strong>${money(spent)}</strong></div><div class="mini-stat"><span>Registros</span><strong>${records.length}</strong></div></div>${next ? `<p class="hint">Próximo aviso: ${escapeHtml(next.label)} · ${escapeHtml(dateOnly(next.date))}</p>` : ""}<div class="td-actions"><button class="btn small danger" data-delete-vehicle="${v.id}">Borrar</button></div></article>`;
+    return `<article class="vehicle-card"><header><div><h5>${vehicleTypeIcon(v.type)} ${escapeHtml(v.name)}</h5><p class="muted">${escapeHtml([v.brand, v.model, v.year, v.plate].filter(Boolean).join(" · ") || "Sin datos técnicos")}</p></div><span class="vehicle-chip ${v.status === "activo" || !v.status ? "ok" : "warn"}">${escapeHtml(v.status || "activo")}</span></header><div class="vehicle-meta-grid"><div class="mini-stat"><span>Kilómetros</span><strong>${v.km ? Number(v.km).toLocaleString("es-ES") : "-"}</strong></div><div class="mini-stat"><span>Gasto ${activeYear()}</span><strong>${money(spent)}</strong></div><div class="mini-stat"><span>Registros</span><strong>${records.length}</strong></div></div>${next ? `<p class="hint">Próximo aviso: ${escapeHtml(next.label)} · ${escapeHtml(dateOnly(next.date))}</p>` : ""}<div class="td-actions"><button class="btn small" data-edit-vehicle="${v.id}">Editar</button><button class="btn small danger" data-delete-vehicle="${v.id}">Borrar</button></div></article>`;
   }).join("")}</div>`;
 }
 
@@ -1147,18 +1205,20 @@ function renderVehicleSelect(name, required = true) {
 
 function renderInsuranceForm() {
   return `<form id="vehicleInsuranceForm">
+    <input name="id" type="hidden" />
     <div class="field"><label>Vehículo</label>${renderVehicleSelect("vehicle_id")}</div>
     <div class="inline-grid"><div class="field"><label>Aseguradora</label><input name="insurance_company" placeholder="Ej. Mapfre, Línea Directa, Mutua..." /></div><div class="field"><label>Total del seguro</label><input name="amount" type="number" step="0.01" min="0" placeholder="Ej. 455" /></div></div>
     <div class="inline-grid"><div class="field"><label>Forma de pago</label><select name="payment_mode"><option value="cash">Al contado</option><option value="financed">Financiado / cuotas</option><option value="monthly">Mensual</option></select></div><div class="field"><label>Estado</label><select name="status"><option value="activo">Activo</option><option value="pendiente">Pendiente</option><option value="finalizado">Finalizado</option><option value="cancelado">Cancelado</option></select></div></div>
     <div class="inline-grid"><div class="field"><label>Inicio / primer pago</label><input name="date" type="date" value="${todayISO()}" /></div><div class="field"><label>Fin de cobertura</label><input name="coverage_end" type="date" /></div></div>
     <div class="inline-grid"><div class="field"><label>Día de pago de cuota</label><input name="installment_day" type="number" min="1" max="31" value="1" /></div><div class="field"><label>Responsable del pago</label><select name="responsible_user_id">${memberOptions(state.user.id)}</select></div></div>
     <div class="field"><label>Notas</label><textarea name="note" placeholder="Nº de póliza, franquicia, teléfono, observaciones..."></textarea></div>
-    <button class="btn primary" type="submit">Guardar seguro</button>
+    <div class="form-actions"><button class="btn primary" id="saveInsuranceBtn" type="submit">Guardar seguro</button><button class="btn ghost" type="button" id="cancelInsuranceEdit" hidden>Cancelar edición</button></div>
   </form>`;
 }
 
 function renderVehicleRecordForm() {
   return `<form id="vehicleRecordForm">
+    <input name="id" type="hidden" />
     <div class="inline-grid"><div class="field"><label>Vehículo</label>${renderVehicleSelect("vehicle_id")}</div><div class="field"><label>Tipo</label><select name="type"><option value="maintenance">Mantenimiento</option><option value="oil">Cambio de aceite</option><option value="tires">Neumáticos</option><option value="itv">ITV</option><option value="repair">Reparación</option><option value="fuel">Combustible</option><option value="tax">Impuesto</option><option value="other">Otro</option></select></div></div>
     <div class="field"><label>Concepto</label><input name="concept" placeholder="Ej. Cambio de aceite, 4 cauchos, revisión de frenos" required /></div>
     <div class="inline-grid"><div class="field"><label>Fecha del gasto / servicio</label><input name="date" type="date" value="${todayISO()}" /></div><div class="field"><label>Importe</label><input name="amount" type="number" step="0.01" min="0" placeholder="0,00" /></div></div>
@@ -1166,13 +1226,13 @@ function renderVehicleRecordForm() {
     <div class="inline-grid"><div class="field"><label>Próxima fecha</label><input name="next_date" type="date" /></div><div class="field"><label>Próximo km</label><input name="next_km" type="number" min="0" placeholder="Ej. 130000" /></div></div>
     <div class="field"><label>Taller / proveedor</label><input name="provider" placeholder="Ej. Norauto, taller de confianza..." /></div>
     <div class="field"><label>Notas</label><textarea name="note" placeholder="Marca del aceite, medida de neumáticos, garantía, factura, observaciones..."></textarea></div>
-    <button class="btn primary" type="submit">Guardar mantenimiento</button>
+    <div class="form-actions"><button class="btn primary" id="saveVehicleRecordBtn" type="submit">Guardar mantenimiento</button><button class="btn ghost" type="button" id="cancelVehicleRecordEdit" hidden>Cancelar edición</button></div>
   </form>`;
 }
 
 function renderVehicleRecordsTable(records) {
   if (!records.length) return `<div class="empty-state"><strong>Sin historial</strong>Los seguros, mantenimientos y gastos aparecerán aquí.</div>`;
-  return `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Vehículo</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Próximo aviso</th><th>Acciones</th></tr></thead><tbody>${records.map(r => { const v = state.vehicles.find(x => x.id === r.vehicle_id); return `<tr><td>${escapeHtml(dateOnly(r.date))}</td><td>${escapeHtml(v?.name || "Vehículo")}</td><td>${escapeHtml(vehicleRecordTypeLabel(r.type))}</td><td>${escapeHtml(r.concept || r.insurance_company || r.note || "Registro")}</td><td><strong>${money(r.amount)}</strong></td><td>${escapeHtml(dateOnly(r.next_date || r.coverage_end) || "-")}</td><td><button class="btn small danger" data-delete-vehicle-record="${r.id}">Borrar</button></td></tr>`; }).join("")}</tbody></table></div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Vehículo</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Próximo aviso</th><th>Acciones</th></tr></thead><tbody>${records.map(r => { const v = state.vehicles.find(x => x.id === r.vehicle_id); return `<tr><td>${escapeHtml(dateOnly(r.date))}</td><td>${escapeHtml(v?.name || "Vehículo")}</td><td>${escapeHtml(vehicleRecordTypeLabel(r.type))}</td><td>${escapeHtml(r.concept || r.insurance_company || r.note || "Registro")}</td><td><strong>${money(r.amount)}</strong></td><td>${escapeHtml(dateOnly(r.next_date || r.coverage_end) || "-")}</td><td><div class="td-actions"><button class="btn small" data-edit-vehicle-record="${r.id}">Editar</button><button class="btn small danger" data-delete-vehicle-record="${r.id}">Borrar</button></div></td></tr>`; }).join("")}</tbody></table></div>`;
 }
 
 function renderReports() {
@@ -1321,8 +1381,13 @@ function bindSectionActions() {
   $$('[data-edit-movement]').forEach(btn => btn.addEventListener("click", () => editMovement(btn.dataset.editMovement)));
   $$('[data-delete-category]').forEach(btn => btn.addEventListener("click", () => deleteCategory(btn.dataset.deleteCategory)));
   $$('[data-delete-goal]').forEach(btn => btn.addEventListener("click", () => deleteGoal(btn.dataset.deleteGoal)));
+  $$('[data-edit-vehicle]').forEach(btn => btn.addEventListener("click", () => editVehicle(btn.dataset.editVehicle)));
   $$('[data-delete-vehicle]').forEach(btn => btn.addEventListener("click", () => deleteVehicle(btn.dataset.deleteVehicle)));
+  $$('[data-edit-vehicle-record]').forEach(btn => btn.addEventListener("click", () => editVehicleRecord(btn.dataset.editVehicleRecord)));
   $$('[data-delete-vehicle-record]').forEach(btn => btn.addEventListener("click", () => deleteVehicleRecord(btn.dataset.deleteVehicleRecord)));
+  $("#cancelVehicleEdit")?.addEventListener("click", resetVehicleFormEdit);
+  $("#cancelInsuranceEdit")?.addEventListener("click", resetInsuranceFormEdit);
+  $("#cancelVehicleRecordEdit")?.addEventListener("click", resetVehicleRecordFormEdit);
   $$('[data-delete-recurring]').forEach(btn => btn.addEventListener("click", () => deleteRecurring(btn.dataset.deleteRecurring)));
 
   const permissionSelect = $("#permissionUserSelect");
@@ -1380,28 +1445,43 @@ async function handleGoalSubmit(event) {
 
 async function handleVehicleSubmit(event) {
   event.preventDefault();
-  if (!can("vehicles", "create")) return showToast("No tienes permiso para crear vehículos.", "danger");
+  if (!can("vehicles", "create") && !can("vehicles", "edit")) return showToast("No tienes permiso para guardar vehículos.", "danger");
   const f = new FormData(event.currentTarget);
+  const id = String(f.get("id") || "").trim();
   const payload = { household_id: state.currentHouseholdId, owner_id: String(f.get("owner_id") || state.user.id), name: String(f.get("name") || "").trim(), plate: String(f.get("plate") || "").trim(), type: f.get("type"), brand: String(f.get("brand") || "").trim(), model: String(f.get("model") || "").trim(), year: f.get("year") ? Number(f.get("year")) : null, km: f.get("km") ? Number(f.get("km")) : null, status: f.get("status") || "activo", notes: String(f.get("notes") || "").trim() };
-  await insertWithSchemaFallback("vehicles", payload, "Vehículo guardado.", ["household_id","owner_id","name","plate","type"]);
+  if (id) {
+    await updateWithSchemaFallback("vehicles", payload, { id, household_id: state.currentHouseholdId }, "Vehículo actualizado.", ["household_id","owner_id","name","plate","type"]);
+  } else {
+    await insertWithSchemaFallback("vehicles", payload, "Vehículo guardado.", ["household_id","owner_id","name","plate","type"]);
+  }
   await loadHouseholdData(); renderApp();
 }
 
 async function handleVehicleInsuranceSubmit(event) {
   event.preventDefault();
-  if (!can("vehicles", "create")) return showToast("No tienes permiso para crear seguros.", "danger");
+  if (!can("vehicles", "create") && !can("vehicles", "edit")) return showToast("No tienes permiso para guardar seguros.", "danger");
   const f = new FormData(event.currentTarget);
+  const id = String(f.get("id") || "").trim();
   const payload = { household_id: state.currentHouseholdId, vehicle_id: f.get("vehicle_id"), user_id: state.user.id, type: "insurance", amount: parseAmount(f.get("amount")), date: f.get("date") || todayISO(), note: String(f.get("note") || "").trim(), concept: "Seguro anual", insurance_company: String(f.get("insurance_company") || "").trim(), payment_mode: f.get("payment_mode"), status: f.get("status") || "activo", coverage_end: f.get("coverage_end") || null, installment_day: f.get("installment_day") ? Number(f.get("installment_day")) : null, responsible_user_id: f.get("responsible_user_id") || state.user.id };
-  await insertWithSchemaFallback("vehicle_records", payload, "Seguro guardado.", ["household_id","vehicle_id","user_id","type","amount","date","note"]);
+  if (id) {
+    await updateWithSchemaFallback("vehicle_records", payload, { id, household_id: state.currentHouseholdId }, "Seguro actualizado.", ["household_id","vehicle_id","user_id","type","amount","date","note"]);
+  } else {
+    await insertWithSchemaFallback("vehicle_records", payload, "Seguro guardado.", ["household_id","vehicle_id","user_id","type","amount","date","note"]);
+  }
   await loadHouseholdData(); renderApp();
 }
 
 async function handleVehicleRecordSubmit(event) {
   event.preventDefault();
-  if (!can("vehicles", "create")) return showToast("No tienes permiso para crear mantenimientos.", "danger");
+  if (!can("vehicles", "create") && !can("vehicles", "edit")) return showToast("No tienes permiso para guardar mantenimientos.", "danger");
   const f = new FormData(event.currentTarget);
+  const id = String(f.get("id") || "").trim();
   const payload = { household_id: state.currentHouseholdId, vehicle_id: f.get("vehicle_id"), user_id: state.user.id, type: f.get("type"), amount: parseAmount(f.get("amount")), date: f.get("date") || todayISO(), note: String(f.get("note") || "").trim(), concept: String(f.get("concept") || "").trim(), status: f.get("status") || "realizado", km: f.get("km") ? Number(f.get("km")) : null, next_date: f.get("next_date") || null, next_km: f.get("next_km") ? Number(f.get("next_km")) : null, provider: String(f.get("provider") || "").trim() };
-  await insertWithSchemaFallback("vehicle_records", payload, "Mantenimiento guardado.", ["household_id","vehicle_id","user_id","type","amount","date","note"]);
+  if (id) {
+    await updateWithSchemaFallback("vehicle_records", payload, { id, household_id: state.currentHouseholdId }, "Mantenimiento actualizado.", ["household_id","vehicle_id","user_id","type","amount","date","note"]);
+  } else {
+    await insertWithSchemaFallback("vehicle_records", payload, "Mantenimiento guardado.", ["household_id","vehicle_id","user_id","type","amount","date","note"]);
+  }
   await loadHouseholdData(); renderApp();
 }
 
@@ -1427,6 +1507,118 @@ async function handleSavePermissions(event) {
 
 async function deleteMovement(id) { if (!confirm("¿Borrar este movimiento?")) return; await withError(supabase.from("movements").delete().eq("id", id), "Movimiento eliminado."); await loadHouseholdData(); renderApp(); }
 async function editMovement(id) { const movement = state.movements.find(m => m.id === id); if (!movement) return; const amount = prompt("Nuevo monto", movement.amount); if (amount === null) return; const description = prompt("Descripción", movement.description || "") ?? movement.description; await withError(supabase.from("movements").update({ amount: parseAmount(amount), description }).eq("id", id), "Movimiento actualizado."); await loadHouseholdData(); renderApp(); }
+
+function resetVehicleFormEdit() {
+  const form = document.getElementById("vehicleForm");
+  if (!form) return;
+  form.reset();
+  setFormField(form, "id", "");
+  document.getElementById("saveVehicleBtn").textContent = "Guardar vehículo";
+  const cancel = document.getElementById("cancelVehicleEdit");
+  if (cancel) cancel.hidden = true;
+}
+
+function editVehicle(id) {
+  const vehicle = state.vehicles.find(v => v.id === id);
+  if (!vehicle) return showToast("No encontré ese vehículo.", "danger");
+  if (state.activeSection !== "vehicles") {
+    state.activeSection = "vehicles";
+    renderApp();
+    setTimeout(() => editVehicle(id), 80);
+    return;
+  }
+  const form = document.getElementById("vehicleForm");
+  if (!form) return;
+  setFormField(form, "id", vehicle.id);
+  setFormField(form, "name", vehicle.name || "");
+  setSelectField(form, "type", vehicle.type || "car");
+  setSelectField(form, "owner_id", vehicle.owner_id || state.user?.id || "");
+  setFormField(form, "brand", vehicle.brand || "");
+  setFormField(form, "model", vehicle.model || "");
+  setFormField(form, "plate", vehicle.plate || "");
+  setFormField(form, "year", vehicle.year ?? "");
+  setFormField(form, "km", vehicle.km ?? "");
+  setSelectField(form, "status", vehicle.status || "activo");
+  setFormField(form, "notes", vehicle.notes || "");
+  document.getElementById("saveVehicleBtn").textContent = "Actualizar vehículo";
+  const cancel = document.getElementById("cancelVehicleEdit");
+  if (cancel) cancel.hidden = false;
+  form.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function resetInsuranceFormEdit() {
+  const form = document.getElementById("vehicleInsuranceForm");
+  if (!form) return;
+  form.reset();
+  setFormField(form, "id", "");
+  setFormField(form, "date", todayISO());
+  setFormField(form, "installment_day", 1);
+  document.getElementById("saveInsuranceBtn").textContent = "Guardar seguro";
+  const cancel = document.getElementById("cancelInsuranceEdit");
+  if (cancel) cancel.hidden = true;
+}
+
+function resetVehicleRecordFormEdit() {
+  const form = document.getElementById("vehicleRecordForm");
+  if (!form) return;
+  form.reset();
+  setFormField(form, "id", "");
+  setFormField(form, "date", todayISO());
+  document.getElementById("saveVehicleRecordBtn").textContent = "Guardar mantenimiento";
+  const cancel = document.getElementById("cancelVehicleRecordEdit");
+  if (cancel) cancel.hidden = true;
+}
+
+function editVehicleRecord(id) {
+  const record = state.vehicleRecords.find(r => r.id === id);
+  if (!record) return showToast("No encontré ese registro.", "danger");
+  if (state.activeSection !== "vehicles") {
+    state.activeSection = "vehicles";
+    renderApp();
+    setTimeout(() => editVehicleRecord(id), 80);
+    return;
+  }
+  const isInsurance = record.type === "insurance";
+  const form = document.getElementById(isInsurance ? "vehicleInsuranceForm" : "vehicleRecordForm");
+  if (!form) return;
+
+  if (isInsurance) {
+    resetVehicleRecordFormEdit();
+    setFormField(form, "id", record.id);
+    setSelectField(form, "vehicle_id", record.vehicle_id || "");
+    setFormField(form, "insurance_company", record.insurance_company || "");
+    setFormField(form, "amount", record.amount ?? "");
+    setSelectField(form, "payment_mode", record.payment_mode || "cash");
+    setSelectField(form, "status", record.status || "activo");
+    setFormField(form, "date", dateOnly(record.date) || todayISO());
+    setFormField(form, "coverage_end", dateOnly(record.coverage_end) || "");
+    setFormField(form, "installment_day", record.installment_day ?? 1);
+    setSelectField(form, "responsible_user_id", record.responsible_user_id || record.user_id || state.user?.id || "");
+    setFormField(form, "note", record.note || "");
+    document.getElementById("saveInsuranceBtn").textContent = "Actualizar seguro";
+    const cancel = document.getElementById("cancelInsuranceEdit");
+    if (cancel) cancel.hidden = false;
+  } else {
+    resetInsuranceFormEdit();
+    setFormField(form, "id", record.id);
+    setSelectField(form, "vehicle_id", record.vehicle_id || "");
+    setSelectField(form, "type", record.type || "maintenance");
+    setFormField(form, "concept", record.concept || record.insurance_company || "");
+    setFormField(form, "date", dateOnly(record.date) || todayISO());
+    setFormField(form, "amount", record.amount ?? "");
+    setFormField(form, "km", record.km ?? "");
+    setSelectField(form, "status", record.status || "realizado");
+    setFormField(form, "next_date", dateOnly(record.next_date) || "");
+    setFormField(form, "next_km", record.next_km ?? "");
+    setFormField(form, "provider", record.provider || "");
+    setFormField(form, "note", record.note || "");
+    document.getElementById("saveVehicleRecordBtn").textContent = "Actualizar mantenimiento";
+    const cancel = document.getElementById("cancelVehicleRecordEdit");
+    if (cancel) cancel.hidden = false;
+  }
+  form.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 async function deleteCategory(id) { if (!confirm("¿Borrar categoría? Los movimientos que la usen quedarán sin categoría.")) return; await withError(supabase.from("categories").delete().eq("id", id), "Categoría eliminada."); await loadHouseholdData(); renderApp(); }
 async function deleteGoal(id) { if (!confirm("¿Borrar meta?")) return; await withError(supabase.from("goals").delete().eq("id", id), "Meta eliminada."); await loadHouseholdData(); renderApp(); }
 async function deleteVehicle(id) { if (!confirm("¿Borrar vehículo? También se borrará su historial.")) return; await withError(supabase.from("vehicles").delete().eq("id", id), "Vehículo eliminado."); await loadHouseholdData(); renderApp(); }
@@ -1962,8 +2154,13 @@ const F360V3 = (() => {
     document.querySelectorAll('[data-edit-movement]').forEach(btn => btn.addEventListener('click', () => editMovement(btn.dataset.editMovement)));
     document.querySelectorAll('[data-delete-category]').forEach(btn => btn.addEventListener('click', () => deleteCategory(btn.dataset.deleteCategory)));
     document.querySelectorAll('[data-delete-goal]').forEach(btn => btn.addEventListener('click', () => deleteGoal(btn.dataset.deleteGoal)));
+    document.querySelectorAll('[data-edit-vehicle]').forEach(btn => btn.addEventListener('click', () => editVehicle(btn.dataset.editVehicle)));
     document.querySelectorAll('[data-delete-vehicle]').forEach(btn => btn.addEventListener('click', () => deleteVehicle(btn.dataset.deleteVehicle)));
+    document.querySelectorAll('[data-edit-vehicle-record]').forEach(btn => btn.addEventListener('click', () => editVehicleRecord(btn.dataset.editVehicleRecord)));
     document.querySelectorAll('[data-delete-vehicle-record]').forEach(btn => btn.addEventListener('click', () => deleteVehicleRecord(btn.dataset.deleteVehicleRecord)));
+    document.getElementById('cancelVehicleEdit')?.addEventListener('click', resetVehicleFormEdit);
+    document.getElementById('cancelInsuranceEdit')?.addEventListener('click', resetInsuranceFormEdit);
+    document.getElementById('cancelVehicleRecordEdit')?.addEventListener('click', resetVehicleRecordFormEdit);
     document.querySelectorAll('[data-delete-recurring]').forEach(btn => btn.addEventListener('click', () => deleteRecurring(btn.dataset.deleteRecurring)));
     const permissionSelect = document.getElementById('permissionUserSelect');
     if (permissionSelect) { renderPermissionEditor(permissionSelect.value); permissionSelect.addEventListener('change', e => renderPermissionEditor(e.target.value)); }
