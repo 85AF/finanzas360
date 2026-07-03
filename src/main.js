@@ -2652,4 +2652,467 @@ renderBackup = F360V3.renderBackup;
 bindSectionActions = F360V3.bindSectionActions;
 
 
+// ─────────────────────────────────────────────────────────────
+// V6 · Integración visible del index.html antiguo dentro de la app Supabase
+// Mantiene el look & feel actual, pero trae bloques funcionales que faltaban:
+// - Centro financiero inteligente visible en Inicio
+// - Filtros completos y ordenación real en Movimientos
+// - Edición directa de categorías y metas
+// - Edición rápida de recurrentes
+// - Importar JSON y cargar datos demo desde Respaldo/Inicio
+// ─────────────────────────────────────────────────────────────
+const F360V6 = (() => {
+  const baseRenderDashboard = renderDashboard;
+  const baseRenderBackup = renderBackup;
+  const baseBindSectionActions = bindSectionActions;
+
+  state.filters.shared ||= "all";
+  state.filters.member ||= "all";
+  state.filters.sortField ||= "date";
+  state.filters.sortDirection ||= "desc";
+  state.financeCoach ||= { focus: "balance", investmentProfile: "balanced", cutIdeasLimit: 5 };
+
+  const v6Months = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const v6MonthName = (key = activeMonth()) => `${v6Months[Math.max(0, Number(String(key).slice(5,7)) - 1)] || "Mes"} de ${String(key).slice(0,4)}`;
+  const v6Pct = (part, total) => total ? Math.max(0, Math.min(100, Math.round((Number(part || 0) / Number(total || 0)) * 100))) : 0;
+  const v6SignedMoney = (n = 0) => `${Number(n || 0) >= 0 ? "+" : ""}${money(n)}`;
+
+  function v6MonthItems(month = activeMonth(), person = state.filters.person) {
+    return movementsForMonthPerson(month, person, { respectType: false });
+  }
+
+  function v6YearItems(year = activeYear()) {
+    return Array.from({ length: 12 }, (_, idx) => `${year}-${String(idx + 1).padStart(2, "0")}`)
+      .flatMap(month => v6MonthItems(month, state.filters.person));
+  }
+
+  function v6ExpenseCategories(items = []) {
+    const grouped = new Map();
+    items.filter(x => x.type === "expense").forEach(item => {
+      const name = categoryName(item.category_id);
+      const current = grouped.get(name) || { name, total: 0, count: 0 };
+      current.total += Number(item.amount || 0);
+      current.count += 1;
+      grouped.set(name, current);
+    });
+    return [...grouped.values()].sort((a, b) => b.total - a.total);
+  }
+
+  function v6MovementSortValue(movement, field = state.filters.sortField) {
+    if (field === "amount") return Number(movement.amount || 0);
+    if (field === "type") return movement.type === "income" ? 1 : 0;
+    if (field === "category") return categoryName(movement.category_id).toLowerCase();
+    if (field === "member") return memberName(movement.member_id || movement.user_id).toLowerCase();
+    if (field === "concept") return String(movement.description || movement.notes || "").toLowerCase();
+    if (field === "share") return movement.is_shared ? 1 : 0;
+    return dateOnly(movement.date || movement.created_at || "");
+  }
+
+  function v6FilteredMovements() {
+    let items = getVisibleMovements();
+    if (state.filters.month) items = items.filter(x => isSameMonth(x.date, state.filters.month));
+    if (state.filters.movementType && state.filters.movementType !== "all") items = items.filter(x => x.type === state.filters.movementType);
+    if (state.filters.category && state.filters.category !== "all") items = items.filter(x => x.category_id === state.filters.category);
+    if (state.filters.member && state.filters.member !== "all") items = items.filter(x => (x.member_id || x.user_id) === state.filters.member);
+    if (state.filters.shared === "shared") items = items.filter(x => Boolean(x.is_shared));
+    if (state.filters.shared === "individual") items = items.filter(x => !x.is_shared);
+    if (state.filters.search) items = items.filter(x => movementMatchesText(x, state.filters.search));
+    items = applyPersonFilterWithSharedAllocation(items, state.filters.person);
+    const direction = state.filters.sortDirection === "asc" ? 1 : -1;
+    const field = state.filters.sortField || "date";
+    return [...items].sort((a, b) => {
+      const av = v6MovementSortValue(a, field);
+      const bv = v6MovementSortValue(b, field);
+      if (typeof av === "number" || typeof bv === "number") return ((Number(av) || 0) - (Number(bv) || 0)) * direction;
+      return String(av).localeCompare(String(bv), "es", { numeric: true, sensitivity: "base" }) * direction;
+    });
+  }
+
+  function v6CoachStatus(metrics) {
+    if (metrics.totalIncome <= 0 && metrics.totalExpense <= 0) return { tone: "warn", label: "Sin datos", score: 0, text: "Registra ingresos y gastos para que el diagnóstico sea útil." };
+    if (metrics.totalIncome <= 0) return { tone: "bad", label: "Sin ingresos", score: 15, text: "Hay gastos pero no ingresos registrados en este mes." };
+    const expenseRatio = metrics.totalExpense / metrics.totalIncome;
+    const score = Math.max(0, Math.min(100, Math.round(100 - expenseRatio * 100 + (metrics.balance > 0 ? 12 : 0))));
+    if (expenseRatio <= 0.70) return { tone: "good", label: "Sano", score, text: "Buen margen. Puedes crear fondo de emergencia o acelerar metas." };
+    if (expenseRatio <= 0.90) return { tone: "warn", label: "Apretado", score, text: "Hay margen, pero cualquier gasto sorpresa puede pegar fuerte." };
+    return { tone: "bad", label: "Crítico", score, text: "Los gastos están comiéndose casi todo. Toca recortar y priorizar." };
+  }
+
+  function v6PriorityRows(items) {
+    const cats = v6ExpenseCategories(items);
+    if (!cats.length) return `<div class="empty-mini">Aún no hay gastos suficientes para priorizar. Registra movimientos y aquí aparecerá dónde atacar primero.</div>`;
+    return cats.slice(0, Number(state.financeCoach.cutIdeasLimit || 5)).map((cat, index) => {
+      const className = index === 0 ? "cut" : index < 3 ? "optimize" : "grow";
+      const saving = cat.total * (index === 0 ? 0.15 : 0.10);
+      return `<div class="priority-row"><span class="priority-rank ${className}">${index + 1}</span><div><b>${escapeHtml(cat.name)}</b><p>${cat.count} movimiento(s). Recorte sugerido: revisar tickets, duplicados o gastos variables.</p></div><div class="priority-amount">${money(cat.total)}<small>posible ${money(saving)}</small></div></div>`;
+    }).join("");
+  }
+
+  function v6SmartTips(metrics, cats) {
+    const tips = [];
+    if (metrics.totalIncome <= 0) tips.push(["warn", "⚠", "Registra ingresos", "Sin ingresos el análisis queda cojo. Mete nóminas o entradas reales para calcular ahorro."]);
+    else if (metrics.balance < 0) tips.push(["danger", "!", "Balance negativo", `Te faltan ${money(Math.abs(metrics.balance))} para cerrar el mes en cero.`]);
+    else tips.push(["ok", "✓", "Balance positivo", `Te quedan ${money(metrics.balance)} después de gastos del mes.`]);
+    if (cats[0]) tips.push(["warn", "↯", "Primera partida a revisar", `${cats[0].name} concentra ${money(cats[0].total)}. Ahí está el primer ajuste inteligente.`]);
+    tips.push(["ok", "↻", "Revisa recurrentes", "Nóminas, seguros, cuotas, comida del perro y servicios deben estar como automáticos para que Inicio no mienta."]);
+    return tips.map(t => `<div class="smart-tip ${t[0]}"><span class="tip-icon">${t[1]}</span><div><b>${escapeHtml(t[2])}</b><p>${escapeHtml(t[3])}</p></div></div>`).join("");
+  }
+
+  function v6InvestmentSuggestions(metrics) {
+    const available = Math.max(0, Number(metrics.balance || 0));
+    const profile = state.financeCoach.investmentProfile || "balanced";
+    const emergencyPct = profile === "conservative" ? 70 : profile === "growth" ? 40 : 55;
+    const goalsPct = profile === "growth" ? 45 : 30;
+    const learningPct = Math.max(0, 100 - emergencyPct - goalsPct);
+    if (available <= 0) return `<div class="empty-mini">Primero hay que cerrar el mes en positivo. Sin excedente real, invertir sería postureo financiero y de ese ya hay mucho en Instagram.</div>`;
+    return [
+      ["Fondo de emergencia", emergencyPct, "Prioridad para cubrir imprevistos sin endeudarte."],
+      ["Metas activas", goalsPct, "Aporta a objetivos como entrada, coche, viaje o colchón."],
+      ["Formación / crecimiento", learningPct, "Pequeña partida para mejorar ingresos futuros."]
+    ].map(([title, pctValue, text]) => `<div class="investment-card"><header><b>${escapeHtml(title)}</b><span class="allocation">${pctValue}% · ${money(available * pctValue / 100)}</span></header><p>${escapeHtml(text)}</p></div>`).join("");
+  }
+
+  function v6ActionPlan(metrics, cats) {
+    const top = cats[0]?.name || "la categoría más alta";
+    const steps = [
+      ["Cerrar foto del mes", `Verifica que estén metidos ingresos, gastos puntuales, recurrentes y cuotas de seguros de ${v6MonthName(activeMonth())}.`],
+      ["Atacar el gasto dominante", `Revisa ${top}. No recortes a ciegas: recorta donde más impacto hay.`],
+      ["Separar casa vs personal", "Marca como compartidos alquiler, servicios, comida de casa e internet para que Aportes sea justo."],
+      ["Guardar excedente", metrics.balance > 0 ? `Mueve ${money(Math.max(0, metrics.balance) * 0.3)} mínimo a metas o emergencia.` : "Como el balance está negativo, la meta es llegar a cero antes de ahorrar."]
+    ];
+    return steps.map((s, i) => `<div class="action-step"><span class="step-number">${i + 1}</span><div><b>${escapeHtml(s[0])}</b><p>${escapeHtml(s[1])}</p></div></div>`).join("");
+  }
+
+  function v6FinancialCoachPanel() {
+    const items = v6MonthItems();
+    const metrics = metricsFor(items);
+    const cats = v6ExpenseCategories(items);
+    const status = v6CoachStatus(metrics);
+    const yearMetrics = metricsFor(v6YearItems());
+    return `<section class="section-card finance-command-center v6-financial-coach">
+      <div class="section-icon-row"><div class="section-badge">🧠</div><div><h4>Centro financiero inteligente</h4><p class="sub">Importado del index antiguo: diagnóstico, prioridades, ideas de recorte, inversión orientativa y plan de acción mensual.</p></div></div>
+      <div class="analytics-controls" style="margin-top:14px">
+        <div class="field"><label>Enfoque</label><select id="financeFocus"><option value="balance" ${state.financeCoach.focus === "balance" ? "selected" : ""}>Balance y ahorro</option><option value="cuts" ${state.financeCoach.focus === "cuts" ? "selected" : ""}>Recortes inteligentes</option><option value="investment" ${state.financeCoach.focus === "investment" ? "selected" : ""}>Inversión / metas</option></select></div>
+        <div class="field"><label>Perfil</label><select id="investmentProfile"><option value="conservative" ${state.financeCoach.investmentProfile === "conservative" ? "selected" : ""}>Conservador</option><option value="balanced" ${state.financeCoach.investmentProfile === "balanced" ? "selected" : ""}>Balanceado</option><option value="growth" ${state.financeCoach.investmentProfile === "growth" ? "selected" : ""}>Crecimiento</option></select></div>
+        <div class="field"><label>Ideas de recorte</label><select id="cutIdeasLimit"><option value="3" ${Number(state.financeCoach.cutIdeasLimit) === 3 ? "selected" : ""}>Top 3</option><option value="5" ${Number(state.financeCoach.cutIdeasLimit) === 5 ? "selected" : ""}>Top 5</option><option value="8" ${Number(state.financeCoach.cutIdeasLimit) === 8 ? "selected" : ""}>Top 8</option></select></div>
+        <div class="field"><label>Prueba rápida</label><button class="btn ok block" id="v6SeedDemoBtn" type="button">Cargar datos demo</button></div>
+      </div>
+      <div class="coach-summary-grid">
+        <div class="coach-kpi ${status.tone}"><span>Salud financiera</span><strong>${status.score}/100</strong><em>${escapeHtml(status.label)} · ${escapeHtml(status.text)}</em></div>
+        <div class="coach-kpi ${metrics.balance >= 0 ? "good" : "bad"}"><span>Balance del mes</span><strong>${money(metrics.balance)}</strong><em>${v6SignedMoney(metrics.balance)} en ${v6MonthName(activeMonth())}</em></div>
+        <div class="coach-kpi"><span>Tasa de ahorro</span><strong>${v6Pct(Math.max(0, metrics.balance), metrics.totalIncome)}%</strong><em>Objetivo sano inicial: 10% a 20%.</em></div>
+        <div class="coach-kpi warn"><span>Recorte potencial</span><strong>${money(cats.slice(0,3).reduce((acc, c) => acc + c.total * 0.1, 0))}</strong><em>Estimación conservadora del top 3.</em></div>
+        <div class="coach-kpi"><span>Balance anual</span><strong>${money(yearMetrics.balance)}</strong><em>Año ${activeYear()} según la vista activa.</em></div>
+      </div>
+      <div class="coach-panel-grid">
+        <div class="coach-panel"><h5>Prioridad de gastos</h5><p class="sub">Dónde mirar primero para que el recorte se note.</p><div class="priority-list">${v6PriorityRows(items)}</div></div>
+        <div class="coach-panel"><h5>Tips inteligentes</h5><p class="sub">Alertas simples, accionables y sin humo.</p><div class="smart-tip-list">${v6SmartTips(metrics, cats)}</div></div>
+        <div class="coach-panel"><h5>Distribución sugerida del excedente</h5><p class="sub">No es asesoría financiera, es una guía práctica para ordenar prioridades.</p><div class="investment-list">${v6InvestmentSuggestions(metrics)}</div></div>
+        <div class="coach-panel"><h5>Plan de acción del mes</h5><p class="sub">Pasos concretos para cerrar mejor el mes activo.</p><div class="action-plan-list">${v6ActionPlan(metrics, cats)}</div></div>
+      </div>
+    </section>`;
+  }
+
+  function renderDashboardV6() {
+    let html = baseRenderDashboard();
+    if (html.includes("v6-financial-coach")) return html;
+    const needle = '<section class="grid-2 old-dashboard-grid analytics-main-grid">';
+    if (html.includes(needle)) return html.replace(needle, `${v6FinancialCoachPanel()}${needle}`);
+    return `${v6FinancialCoachPanel()}${html}`;
+  }
+
+  function renderMovementsV6() {
+    const items = v6FilteredMovements();
+    const memberFilterOptions = [`<option value="all" ${state.filters.member === "all" ? "selected" : ""}>Todos</option>`, ...visibleMembers().filter(m => m.user_id).map(m => `<option value="${m.user_id}" ${state.filters.member === m.user_id ? "selected" : ""}>${escapeHtml(memberName(m.user_id))}</option>`)].join("");
+    const sortOptions = [
+      ["date", "Fecha"], ["amount", "Monto"], ["concept", "Concepto"], ["category", "Categoría"], ["member", "Persona"], ["type", "Tipo"], ["share", "Reparto"]
+    ].map(([value, label]) => `<option value="${value}" ${state.filters.sortField === value ? "selected" : ""}>${label}</option>`).join("");
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">📋</div><div><h3>Movimientos del mes</h3><p>Consulta, filtra, ordena, edita y elimina. Incluye puntuales, recurrentes proyectados y cuotas de vehículos.</p></div></div></section>
+      <article class="section-card">
+        <div class="filters">
+          <div class="field"><label>Mes activo</label><input id="filterMonth" type="month" value="${escapeHtml(state.filters.month)}" /></div>
+          <div class="field"><label>Vista</label><select id="filterPerson">${filterPersonOptions()}</select></div>
+          <div class="field"><label>Tipo</label><select id="filterType"><option value="all" ${state.filters.movementType === "all" ? "selected" : ""}>Todos</option><option value="income" ${state.filters.movementType === "income" ? "selected" : ""}>Ingresos</option><option value="expense" ${state.filters.movementType === "expense" ? "selected" : ""}>Gastos</option></select></div>
+          <div class="field"><label>Categoría</label><select id="filterCategory"><option value="all" ${state.filters.category === "all" ? "selected" : ""}>Todas</option>${state.categories.map(c=>`<option value="${c.id}" ${state.filters.category === c.id ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}</select></div>
+          <div class="field"><label>Miembro</label><select id="filterMember">${memberFilterOptions}</select></div>
+          <div class="field"><label>Compartido</label><select id="filterShared"><option value="all" ${state.filters.shared === "all" ? "selected" : ""}>Todos</option><option value="shared" ${state.filters.shared === "shared" ? "selected" : ""}>Solo compartidos</option><option value="individual" ${state.filters.shared === "individual" ? "selected" : ""}>Solo individuales</option></select></div>
+          <div class="field"><label>Buscar</label><input id="filterSearch" value="${escapeHtml(state.filters.search || "")}" placeholder="Concepto, nota, categoría o persona" /></div>
+          <div class="field"><label>Ordenar por</label><select id="filterSortField">${sortOptions}</select></div>
+          <div class="field"><label>Dirección</label><select id="filterSortDirection"><option value="desc" ${state.filters.sortDirection === "desc" ? "selected" : ""}>Mayor / reciente primero</option><option value="asc" ${state.filters.sortDirection === "asc" ? "selected" : ""}>Menor / antiguo primero</option></select></div>
+        </div>
+        ${renderMovementTable(items, true)}
+      </article>`;
+  }
+
+  function renderCategoriesV6() {
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🏷️</div><div><h3>Categorías y presupuestos</h3><p>Organiza ingresos y gastos con presupuesto mensual para detectar excesos.</p></div></div></section>
+      <section class="categories-grid"><article class="section-card"><h4 id="categoryFormTitle">Nueva categoría</h4><form id="categoryFormV6"><input name="id" type="hidden" /><div class="field"><label>Nombre</label><input name="name" required placeholder="Ej. Mascotas" /></div><div class="inline-grid"><div class="field"><label>Tipo</label><select name="type"><option value="expense">Gasto</option><option value="income">Ingreso</option><option value="both">Ambos</option></select></div><div class="field"><label>Presupuesto mensual</label><input name="budget" type="number" step="0.01" placeholder="Solo gastos" /></div></div><div class="field"><label>Color</label><input name="color" type="color" value="#4aa8ff" /></div><div class="form-actions"><button class="btn primary" type="submit" id="saveCategoryBtn">Guardar categoría</button><button class="btn ghost hidden" type="button" id="cancelCategoryEdit">Cancelar edición</button></div></form></article>
+      <article class="section-card"><h4>Listado de categorías</h4>${state.categories.length ? `<div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Tipo</th><th>Presupuesto</th><th>Color</th><th>Acciones</th></tr></thead><tbody>${state.categories.map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.type)}</td><td>${money(c.budget || 0)}</td><td><span class="tag" style="background:${escapeHtml(c.color || '#4aa8ff')};color:white">${escapeHtml(c.color || '')}</span></td><td><div class="td-actions"><button class="btn small" data-edit-category="${c.id}">Editar</button><button class="btn small danger" data-delete-category="${c.id}">Borrar</button></div></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>Sin categorías</strong>Crea tus primeras categorías.</div>`}</article></section>`;
+  }
+
+  function renderGoalsV6() {
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🎯</div><div><h3>Metas de ahorro</h3><p>Objetivos personales o familiares con progreso, fecha límite, icono y notas.</p></div></div></section>
+      <section class="goals-grid"><article class="section-card"><h4 id="goalFormTitle">Nueva meta de ahorro</h4><form id="goalFormV6"><input name="id" type="hidden" /><div class="field"><label>Nombre de la meta</label><input name="name" required placeholder="Ej. Fondo de emergencia, Vacaciones 2026" /></div><div class="inline-grid"><div class="field"><label>Importe objetivo (€)</label><input name="target_amount" type="number" step="0.01" required /></div><div class="field"><label>Ahorro acumulado (€)</label><input name="current_amount" type="number" step="0.01" value="0" /></div></div><div class="inline-grid"><div class="field"><label>Fecha límite</label><input name="deadline" type="date" /></div><div class="field"><label>Icono</label><select name="emoji"><option>🎯</option><option>🏠</option><option>🚗</option><option>✈️</option><option>🛟</option><option>💰</option></select></div></div><div class="field"><label>Notas</label><textarea name="notes" placeholder="Describe para qué es esta meta o cómo vas a ahorrar"></textarea></div><div class="form-actions"><button class="btn primary" type="submit" id="saveGoalBtn">Guardar meta</button><button class="btn ghost hidden" type="button" id="cancelGoalEdit">Cancelar edición</button></div></form></article>
+      <article class="section-card"><h4>Mis metas</h4>${state.goals.length ? state.goals.map(g=>{ const p = v6Pct(g.current_amount, g.target_amount); return `<div class="goal-card"><header><h5>${escapeHtml(g.emoji || '🎯')} ${escapeHtml(g.name)}</h5><div class="td-actions"><button class="btn small" data-edit-goal="${g.id}">Editar</button><button class="btn small danger" data-delete-goal="${g.id}">Borrar</button></div></header><div class="goal-progress-info"><span>${money(g.current_amount)} / ${money(g.target_amount)}</span><b>${p}%</b></div><div class="goal-bar"><span style="width:${p}%"></span></div><p class="hint">${escapeHtml(g.notes || '')}</p></div>`; }).join("") : `<div class="empty-state"><strong>Sin metas todavía</strong>Añade tu primer objetivo de ahorro.</div>`}</article></section>`;
+  }
+
+  function renderRecurringV6() {
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🔁</div><div><h3>Recurrentes configurados</h3><p>Pagos, ingresos, deudas y servicios variables que se repiten. Se proyectan en Inicio y Movimientos.</p></div></div></section>
+      <article class="section-card"><h4>Automáticos y servicios configurados</h4>${state.recurring.length ? `<div class="table-wrap"><table><thead><tr><th>Concepto</th><th>Tipo</th><th>Importe</th><th>Día</th><th>Frecuencia</th><th>Persona</th><th>Compartido</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${state.recurring.map(r=>`<tr><td>${escapeHtml(r.description)}</td><td>${r.type==='income'?'Ingreso':'Gasto'}</td><td><strong>${money(r.amount)}</strong></td><td>${escapeHtml(r.day_of_month || '-')}</td><td>${escapeHtml(r.frequency || 'monthly')}</td><td>${escapeHtml(memberName(r.member_id || r.user_id))}</td><td>${r.is_shared?'Sí':'No'}</td><td>${r.active!==false?'Activo':'Inactivo'}</td><td><div class="td-actions"><button class="btn small" data-edit-recurring="${r.id}">Editar</button><button class="btn small danger" data-delete-recurring="${r.id}">Borrar</button></div></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>Sin recurrentes todavía</strong>Créalo desde Registrar.</div>`}</article>`;
+  }
+
+  function renderBackupV6() {
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">💾</div><div><h3>Respaldo, importación y demo</h3><p>Exporta tus datos visibles, importa un JSON compatible o carga una prueba rápida.</p></div></div></section>
+      <section class="backup-grid"><article class="section-card"><h4>Copias de seguridad</h4><p class="sub">Descarga JSON o CSV de lo que tu usuario tiene permiso de ver.</p><div class="form-actions"><button class="btn primary" id="exportJsonBtn">Exportar JSON</button><button class="btn dark" id="exportCsvBtn">Exportar movimientos CSV</button></div></article>
+      <article class="section-card"><h4>Importar JSON / datos de ejemplo</h4><p class="sub">Importa un respaldo generado por Finanzas 360 o carga datos ficticios para comprobar que las gráficas y cálculos se mueven.</p><div class="form-grid"><input id="importJsonFile" type="file" accept="application/json,.json" /><div class="form-actions"><button class="btn ok" id="importJsonBtn" type="button">Importar JSON</button><button class="btn ghost" id="v6SeedDemoBtnBackup" type="button">Cargar datos demo</button></div></div><p class="hint">La importación no borra tu información actual; agrega los registros al hogar activo.</p></article>
+      <article class="section-card"><h4>Zona delicada</h4><p class="sub">Para backups completos o restauraciones grandes usa Supabase Dashboard. Esta importación es práctica para migrar datos de usuario.</p></article></section>`;
+  }
+
+  function fillCategoryFormV6(id) {
+    const c = state.categories.find(x => x.id === id);
+    const form = document.getElementById("categoryFormV6");
+    if (!c || !form) return;
+    form.id.value = c.id;
+    form.name.value = c.name || "";
+    form.type.value = c.type || "expense";
+    form.budget.value = c.budget ?? "";
+    form.color.value = c.color || "#4aa8ff";
+    document.getElementById("categoryFormTitle").textContent = `Editando categoría: ${c.name}`;
+    document.getElementById("saveCategoryBtn").textContent = "Actualizar categoría";
+    document.getElementById("cancelCategoryEdit")?.classList.remove("hidden");
+    form.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function resetCategoryFormV6() {
+    const form = document.getElementById("categoryFormV6");
+    if (!form) return;
+    form.reset();
+    form.id.value = "";
+    document.getElementById("categoryFormTitle").textContent = "Nueva categoría";
+    document.getElementById("saveCategoryBtn").textContent = "Guardar categoría";
+    document.getElementById("cancelCategoryEdit")?.classList.add("hidden");
+  }
+
+  async function handleCategorySubmitV6(event) {
+    event.preventDefault();
+    const f = new FormData(event.currentTarget);
+    const id = String(f.get("id") || "").trim();
+    const payload = { household_id: state.currentHouseholdId, name: String(f.get("name") || "").trim(), type: f.get("type"), color: f.get("color") || "#4aa8ff", budget: parseAmount(f.get("budget")) };
+    if (id) {
+      if (!can("categories", "edit")) return showToast("No tienes permiso para editar categorías.", "danger");
+      await updateWithSchemaFallback("categories", payload, { id, household_id: state.currentHouseholdId }, "Categoría actualizada.", ["household_id","name","type","color"]);
+    } else {
+      if (!can("categories", "create")) return showToast("No tienes permiso para crear categorías.", "danger");
+      await insertWithSchemaFallback("categories", payload, "Categoría creada.", ["household_id","name","type","color"]);
+    }
+    await loadHouseholdData(); renderApp();
+  }
+
+  function fillGoalFormV6(id) {
+    const g = state.goals.find(x => x.id === id);
+    const form = document.getElementById("goalFormV6");
+    if (!g || !form) return;
+    form.id.value = g.id;
+    form.name.value = g.name || "";
+    form.target_amount.value = g.target_amount ?? "";
+    form.current_amount.value = g.current_amount ?? 0;
+    form.deadline.value = dateOnly(g.deadline) || "";
+    form.emoji.value = g.emoji || "🎯";
+    form.notes.value = g.notes || "";
+    document.getElementById("goalFormTitle").textContent = `Editando meta: ${g.name}`;
+    document.getElementById("saveGoalBtn").textContent = "Actualizar meta";
+    document.getElementById("cancelGoalEdit")?.classList.remove("hidden");
+    form.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function resetGoalFormV6() {
+    const form = document.getElementById("goalFormV6");
+    if (!form) return;
+    form.reset();
+    form.id.value = "";
+    form.current_amount.value = 0;
+    document.getElementById("goalFormTitle").textContent = "Nueva meta de ahorro";
+    document.getElementById("saveGoalBtn").textContent = "Guardar meta";
+    document.getElementById("cancelGoalEdit")?.classList.add("hidden");
+  }
+
+  async function handleGoalSubmitV6(event) {
+    event.preventDefault();
+    const f = new FormData(event.currentTarget);
+    const id = String(f.get("id") || "").trim();
+    const payload = { household_id: state.currentHouseholdId, user_id: state.user.id, name: String(f.get("name") || "").trim(), target_amount: parseAmount(f.get("target_amount")), current_amount: parseAmount(f.get("current_amount")), deadline: f.get("deadline") || null, emoji: String(f.get("emoji") || "🎯"), notes: String(f.get("notes") || "") };
+    if (id) {
+      if (!can("goals", "edit")) return showToast("No tienes permiso para editar metas.", "danger");
+      await updateWithSchemaFallback("goals", payload, { id, household_id: state.currentHouseholdId }, "Meta actualizada.", ["household_id","user_id","name","target_amount","current_amount","deadline"]);
+    } else {
+      if (!can("goals", "create")) return showToast("No tienes permiso para crear metas.", "danger");
+      await insertWithSchemaFallback("goals", payload, "Meta guardada.", ["household_id","user_id","name","target_amount","current_amount","deadline"]);
+    }
+    await loadHouseholdData(); renderApp();
+  }
+
+  async function editRecurringV6(id) {
+    const r = state.recurring.find(x => x.id === id);
+    if (!r) return showToast("No encontré ese recurrente.", "danger");
+    if (!can("recurring", "edit") && !can("register", "edit")) return showToast("No tienes permiso para editar recurrentes.", "danger");
+    const description = prompt("Concepto del recurrente", r.description || "");
+    if (description === null) return;
+    const amount = prompt("Importe", r.amount ?? 0);
+    if (amount === null) return;
+    const activeAnswer = confirm("¿Dejar este recurrente activo? Aceptar = activo / Cancelar = pausado");
+    await updateWithSchemaFallback("recurring_movements", { description: String(description || "").trim(), amount: parseAmount(amount), active: activeAnswer }, { id, household_id: state.currentHouseholdId }, "Recurrente actualizado.", ["description","amount","active"]);
+    await loadHouseholdData(); renderApp();
+  }
+
+  async function seedDemoDataV6() {
+    if (!state.currentHouseholdId || !state.user?.id) return;
+    const now = activeMonth();
+    const demoDescriptions = ["Demo · Nómina", "Demo · Comida", "Demo · Gasolina", "Demo · Internet", "Demo · Ahorro"];
+    const existingDemo = state.movements.some(m => demoDescriptions.includes(m.description));
+    if (existingDemo && !confirm("Ya hay datos demo. ¿Quieres cargar otra tanda igualmente?")) return;
+    const categoryRows = [
+      { household_id: state.currentHouseholdId, name: "Demo ingresos", type: "income", color: "#22c55e" },
+      { household_id: state.currentHouseholdId, name: "Comida", type: "expense", color: "#ef4444" },
+      { household_id: state.currentHouseholdId, name: "Transporte", type: "expense", color: "#f59e0b" },
+      { household_id: state.currentHouseholdId, name: "Servicios", type: "expense", color: "#3b82f6" },
+      { household_id: state.currentHouseholdId, name: "Ahorro", type: "expense", color: "#10b981" }
+    ];
+    await supabase.from("categories").upsert(categoryRows, { onConflict: "household_id,name,type" });
+    await loadHouseholdData();
+    const cat = name => state.categories.find(c => c.name === name)?.id || null;
+    const rows = [
+      { household_id: state.currentHouseholdId, user_id: state.user.id, member_id: state.user.id, type: "income", amount: 1600, date: `${now}-01`, category_id: cat("Demo ingresos"), description: "Demo · Nómina", notes: "Datos ficticios para probar dashboard", is_shared: false, kind: "personal", share_method: "none" },
+      { household_id: state.currentHouseholdId, user_id: state.user.id, member_id: state.user.id, type: "expense", amount: 410, date: `${now}-03`, category_id: cat("Comida"), description: "Demo · Comida", notes: "Gasto compartido de casa", is_shared: true, kind: "shared", share_method: "equal" },
+      { household_id: state.currentHouseholdId, user_id: state.user.id, member_id: state.user.id, type: "expense", amount: 280, date: `${now}-08`, category_id: cat("Transporte"), description: "Demo · Gasolina", notes: "Gasto mensual estimado", is_shared: false, kind: "vehicle", share_method: "none" },
+      { household_id: state.currentHouseholdId, user_id: state.user.id, member_id: state.user.id, type: "expense", amount: 170, date: `${now}-12`, category_id: cat("Servicios"), description: "Demo · Internet", notes: "Servicio mensual", is_shared: true, kind: "shared", share_method: "equal" },
+      { household_id: state.currentHouseholdId, user_id: state.user.id, member_id: state.user.id, type: "expense", amount: 150, date: `${now}-20`, category_id: cat("Ahorro"), description: "Demo · Ahorro", notes: "Aporte ficticio a meta", is_shared: false, kind: "saving", share_method: "none" }
+    ];
+    for (const row of rows) {
+      await insertWithSchemaFallback("movements", row, "", ["household_id","user_id","member_id","type","amount","date","category_id","description","is_shared"]);
+    }
+    showToast("Datos demo cargados.", "ok");
+    await loadHouseholdData(); renderApp();
+  }
+
+  function cleanImportRow(row, table) {
+    const copy = { ...row };
+    delete copy.id; delete copy.created_at; delete copy.updated_at; delete copy._source; delete copy._recurring_id; delete copy._vehicle_record_id;
+    copy.household_id = state.currentHouseholdId;
+    if (["movements", "goals", "recurring_movements", "vehicle_records"].includes(table)) copy.user_id = state.user.id;
+    if (table === "vehicles") copy.owner_id = copy.owner_id || state.user.id;
+    if (table === "movements") copy.member_id = copy.member_id || state.user.id;
+    return copy;
+  }
+
+  async function importJsonV6() {
+    const input = document.getElementById("importJsonFile");
+    const file = input?.files?.[0];
+    if (!file) return showToast("Selecciona primero un archivo JSON.", "danger");
+    let data;
+    try { data = JSON.parse(await file.text()); }
+    catch { return showToast("Ese JSON no se pudo leer.", "danger"); }
+    if (!confirm("Se agregarán los datos del JSON al hogar activo. No se borrará nada. ¿Continuamos?")) return;
+    const tables = [
+      ["categories", data.categories || []],
+      ["movements", data.movements || []],
+      ["recurring_movements", data.recurring || data.recurring_movements || []],
+      ["goals", data.goals || []],
+      ["vehicles", data.vehicles || []],
+      ["vehicle_records", data.vehicle_records || data.vehicleRecords || []]
+    ];
+    for (const [table, rows] of tables) {
+      if (!Array.isArray(rows) || !rows.length) continue;
+      const cleaned = rows.map(row => cleanImportRow(row, table));
+      await insertWithSchemaFallback(table, cleaned, "", Object.keys(cleaned[0] || {}).filter(k => !["budget","notes","kind","share_method","emoji","brand","model","km","status","concept","payment_mode","insurance_company","coverage_end","installment_day","installment_count","installment_amount"].includes(k)));
+    }
+    await loadHouseholdData(); renderApp();
+    showToast("Importación terminada. Revisa Inicio, Movimientos y Respaldo.", "ok");
+  }
+
+
+  function renderSectionV6() {
+    const section = state.activeSection;
+    if (section === "dashboard") return renderDashboardV6();
+    if (section === "categories") return renderCategoriesV6();
+    if (section === "members") return renderMembersSection();
+    if (section === "household") return renderHousehold();
+    if (section === "register") return renderRegister();
+    if (section === "vehicles") return renderVehicles();
+    if (section === "movements") return renderMovementsV6();
+    if (section === "goals") return renderGoalsV6();
+    if (section === "history") return renderHistory();
+    if (section === "backup") return renderBackupV6();
+    if (section === "recurring") return renderRecurringV6();
+    if (section === "reports") return renderReports();
+    if (section === "admin") return renderAdmin();
+    return renderDashboardV6();
+  }
+
+  function renderAppV6() {
+    app.className = "app app-sidebar app-old-mirror";
+    const currentHousehold = getCurrentHousehold();
+    const modules = visibleModules();
+    app.innerHTML = `
+      <aside class="side-nav old-side" aria-label="Menú principal">
+        <div class="side-brand old-side-brand">
+          <div class="brand-logo">F3</div>
+          <div><h1>Finanzas 360</h1><span>Tu gestor financiero personal</span></div>
+        </div>
+        ${state.households.length > 1 ? `<div class="field side-switch"><label>Hogar activo</label><select id="householdSwitcher">${state.households.map(h => `<option value="${h.id}" ${h.id === state.currentHouseholdId ? "selected" : ""}>${escapeHtml(h.name)}</option>`).join("")}</select></div>` : `<div class="side-household-name">${escapeHtml(currentHousehold?.name || "Familia")}</div>`}
+        <div class="side-divider"></div>
+        <span class="side-menu-title">Menú principal</span>
+        <nav class="nav side-menu old-menu">
+          ${modules.map(m => `<button type="button" class="${state.activeSection === m.key ? "active" : ""}" data-section="${m.key}"><span>${m.icon}</span><b>${m.label}</b></button>`).join("")}
+        </nav>
+        <div class="side-footer">
+          <div class="side-user"><strong>${escapeHtml(state.profile?.full_name || state.user.email)}</strong><span>${escapeHtml(state.currentMember?.role || "usuario")}</span></div>
+          <button class="btn ghost small" id="exportJsonBtn">💾 Exportar datos</button>
+          <button class="btn ok small" id="refreshBtn">Actualizar</button>
+          <button class="btn danger small" id="logoutBtn">Salir</button>
+        </div>
+      </aside>
+      <main class="content-area old-content">
+        ${renderSectionV6()}
+      </main>
+    `;
+    bindCommonActions();
+    bindSectionActionsV6();
+  }
+
+  function bindSectionActionsV6() {
+    baseBindSectionActions();
+    document.getElementById("filterMember")?.addEventListener("change", e => { state.filters.member = e.target.value || "all"; renderApp(); });
+    document.getElementById("filterShared")?.addEventListener("change", e => { state.filters.shared = e.target.value || "all"; renderApp(); });
+    document.getElementById("filterSortField")?.addEventListener("change", e => { state.filters.sortField = e.target.value || "date"; renderApp(); });
+    document.getElementById("filterSortDirection")?.addEventListener("change", e => { state.filters.sortDirection = e.target.value || "desc"; renderApp(); });
+    document.getElementById("financeFocus")?.addEventListener("change", e => { state.financeCoach.focus = e.target.value || "balance"; renderApp(); });
+    document.getElementById("investmentProfile")?.addEventListener("change", e => { state.financeCoach.investmentProfile = e.target.value || "balanced"; renderApp(); });
+    document.getElementById("cutIdeasLimit")?.addEventListener("change", e => { state.financeCoach.cutIdeasLimit = Number(e.target.value || 5); renderApp(); });
+    document.getElementById("v6SeedDemoBtn")?.addEventListener("click", seedDemoDataV6);
+    document.getElementById("v6SeedDemoBtnBackup")?.addEventListener("click", seedDemoDataV6);
+    document.getElementById("importJsonBtn")?.addEventListener("click", importJsonV6);
+    document.getElementById("categoryFormV6")?.addEventListener("submit", handleCategorySubmitV6);
+    document.getElementById("cancelCategoryEdit")?.addEventListener("click", resetCategoryFormV6);
+    document.querySelectorAll("[data-edit-category]").forEach(btn => btn.addEventListener("click", () => fillCategoryFormV6(btn.dataset.editCategory)));
+    document.getElementById("goalFormV6")?.addEventListener("submit", handleGoalSubmitV6);
+    document.getElementById("cancelGoalEdit")?.addEventListener("click", resetGoalFormV6);
+    document.querySelectorAll("[data-edit-goal]").forEach(btn => btn.addEventListener("click", () => fillGoalFormV6(btn.dataset.editGoal)));
+    document.querySelectorAll("[data-edit-recurring]").forEach(btn => btn.addEventListener("click", () => editRecurringV6(btn.dataset.editRecurring)));
+  }
+
+  return { renderAppV6, renderSectionV6, renderDashboardV6, renderMovementsV6, renderCategoriesV6, renderGoalsV6, renderRecurringV6, renderBackupV6, bindSectionActionsV6, v6FilteredMovements };
+})();
+
+renderApp = F360V6.renderAppV6;
+renderSection = F360V6.renderSectionV6;
+renderDashboard = F360V6.renderDashboardV6;
+renderMovements = F360V6.renderMovementsV6;
+renderCategories = F360V6.renderCategoriesV6;
+renderGoals = F360V6.renderGoalsV6;
+renderRecurring = F360V6.renderRecurringV6;
+renderBackup = F360V6.renderBackupV6;
+bindSectionActions = F360V6.bindSectionActionsV6;
+getMovementsFiltered = F360V6.v6FilteredMovements;
+
+
 init();
