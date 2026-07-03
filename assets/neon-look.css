@@ -10143,3 +10143,466 @@ body {
     min-width: 680px !important;
   }
 }
+
+
+
+/* ==========================================================
+   F360 UX SYSTEM · Responsive polish layer
+   Objetivo: mejorar experiencia visual sin tocar lógica.
+   - Jerarquía clara
+   - Cards consistentes
+   - Mobile first real
+   - Cero overflow horizontal
+   - Pote del hogar compacto y legible
+========================================================== */
+
+:root {
+  --ux-page-max: 1520px;
+  --ux-radius-lg: 28px;
+  --ux-radius-md: 22px;
+  --ux-radius-sm: 16px;
+  --ux-gap: clamp(14px, 1.6vw, 24px);
+  --ux-gap-sm: clamp(10px, 1vw, 16px);
+  --ux-card-pad: clamp(18px, 2vw, 28px);
+  --ux-card-pad-sm: clamp(14px, 1.4vw, 20px);
+  --ux-readable: 72ch;
+}
+
+html,
+body {
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+}
+
+.app-old-mirror,
+.app-old-mirror * {
+  box-sizing: border-box !important;
+}
+
+.app-old-mirror {
+  min-width: 0 !important;
+}
+
+/* Contenedor general: elimina el vacío lateral raro en escritorio */
+.app-old-mirror main,
+.app-old-mirror .main,
+.app-old-mirror .content,
+.app-old-mirror .app-main,
+.app-old-mirror #app,
+.app-old-mirror .view,
+.app-old-mirror .screen {
+  min-width: 0 !important;
+}
+
+.app-old-mirror .main-content,
+.app-old-mirror .content-area,
+.app-old-mirror .dashboard-shell,
+.app-old-mirror .page-content {
+  width: min(100%, var(--ux-page-max)) !important;
+  margin-inline: auto !important;
+}
+
+/* Secciones: una card = una idea. Menos ruido, más orden. */
+.app-old-mirror .section-card,
+.app-old-mirror .panel-card,
+.app-old-mirror .dashboard-card,
+.app-old-mirror .ux-card,
+.app-old-mirror .analytics-card,
+.app-old-mirror .monthly-contribution-card,
+.app-old-mirror .house-pot-card {
+  border-radius: var(--ux-radius-lg) !important;
+  padding: var(--ux-card-pad) !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+.app-old-mirror .section-card + .section-card,
+.app-old-mirror .panel-card + .panel-card,
+.app-old-mirror .dashboard-card + .dashboard-card {
+  margin-top: var(--ux-gap) !important;
+}
+
+/* Títulos y textos: que respiren y se lean */
+.app-old-mirror h1,
+.app-old-mirror h2,
+.app-old-mirror h3,
+.app-old-mirror h4 {
+  letter-spacing: -0.035em !important;
+  text-wrap: balance !important;
+}
+
+.app-old-mirror p,
+.app-old-mirror .sub,
+.app-old-mirror .helper,
+.app-old-mirror .section-help {
+  max-width: var(--ux-readable) !important;
+  line-height: 1.55 !important;
+}
+
+/* Filtros superiores: controles con anchura útil, sin estirarse como liga */
+.app-old-mirror .dashboard-filters,
+.app-old-mirror .filters-grid,
+.app-old-mirror .filter-grid,
+.app-old-mirror .top-controls {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)) !important;
+  gap: var(--ux-gap-sm) !important;
+  align-items: end !important;
+}
+
+.app-old-mirror select,
+.app-old-mirror input,
+.app-old-mirror textarea {
+  max-width: 100% !important;
+}
+
+/* Botones: tamaño táctil mínimo y alineación consistente */
+.app-old-mirror button,
+.app-old-mirror .btn,
+.app-old-mirror .action-btn {
+  min-height: 44px !important;
+  touch-action: manipulation !important;
+}
+
+/* POTE DEL HOGAR: rediseño compacto, sin desbordar números */
+.app-old-mirror .house-pot-head {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 430px) !important;
+  gap: clamp(18px, 3vw, 40px) !important;
+  align-items: start !important;
+}
+
+.app-old-mirror .house-pot-head > div:first-child {
+  min-width: 0 !important;
+}
+
+.app-old-mirror .house-pot-head h4 {
+  font-size: clamp(1.65rem, 3.2vw, 2.55rem) !important;
+  line-height: 1.04 !important;
+  margin-bottom: 10px !important;
+}
+
+.app-old-mirror .house-pot-personal {
+  display: inline-grid !important;
+  grid-template-columns: auto auto auto !important;
+  align-items: center !important;
+  gap: 10px 14px !important;
+  max-width: 100% !important;
+}
+
+.app-old-mirror .house-pot-status-card {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  border-radius: 26px !important;
+  overflow: hidden !important;
+  background: var(--f360-surface) !important;
+  border: 1px solid var(--f360-border) !important;
+  box-shadow: var(--f360-outset-soft) !important;
+}
+
+.app-old-mirror .house-pot-status {
+  min-width: 0 !important;
+  padding: clamp(16px, 2vw, 24px) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  min-height: 146px !important;
+}
+
+.app-old-mirror .house-pot-status.available {
+  background: linear-gradient(135deg, rgba(37,165,106,.12), rgba(37,165,106,.035)) !important;
+  border-right: 1px solid var(--f360-border) !important;
+}
+
+.app-old-mirror .house-pot-status.shortfall {
+  background: linear-gradient(135deg, rgba(239,86,112,.12), rgba(239,86,112,.035)) !important;
+}
+
+.app-old-mirror .house-pot-status span {
+  color: var(--f360-muted) !important;
+  font-size: .74rem !important;
+  font-weight: 950 !important;
+  text-transform: uppercase !important;
+  letter-spacing: .07em !important;
+  white-space: nowrap !important;
+}
+
+.app-old-mirror .house-pot-status strong {
+  display: block !important;
+  max-width: 100% !important;
+  font-size: clamp(2rem, 4.2vw, 3.25rem) !important;
+  line-height: .95 !important;
+  letter-spacing: -0.055em !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: clip !important;
+}
+
+.app-old-mirror .house-pot-status.available strong {
+  color: var(--f360-ok, #25a56a) !important;
+}
+
+.app-old-mirror .house-pot-status.shortfall strong {
+  color: var(--f360-danger, #ef5670) !important;
+}
+
+.app-old-mirror .house-pot-status em {
+  color: var(--f360-muted) !important;
+  font-style: normal !important;
+  font-size: .86rem !important;
+  line-height: 1.25 !important;
+}
+
+.app-old-mirror .house-pot-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: var(--ux-gap-sm) !important;
+}
+
+.app-old-mirror .house-pot-stats > div {
+  min-width: 0 !important;
+  min-height: 104px !important;
+  padding: var(--ux-card-pad-sm) !important;
+}
+
+.app-old-mirror .house-pot-stats strong {
+  font-size: clamp(1.5rem, 2.4vw, 2.1rem) !important;
+  letter-spacing: -0.04em !important;
+  overflow-wrap: anywhere !important;
+}
+
+.app-old-mirror .house-pot-body {
+  display: grid !important;
+  grid-template-columns: minmax(260px, .82fr) minmax(240px, .72fr) minmax(0, 1.55fr) !important;
+  gap: var(--ux-gap) !important;
+  align-items: start !important;
+}
+
+.app-old-mirror .house-pot-summary,
+.app-old-mirror .house-pot-people,
+.app-old-mirror .house-pot-expenses {
+  min-width: 0 !important;
+}
+
+.app-old-mirror .house-pot-expenses .contribution-list {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: var(--ux-gap-sm) !important;
+}
+
+/* Gráficas y comparadores: altura por contenido, nada de huecos gigantes */
+.app-old-mirror .chart-card,
+.app-old-mirror .graph-card,
+.app-old-mirror .compare-card,
+.app-old-mirror .ux-year-card,
+.app-old-mirror .ux-category-compare-card {
+  min-height: auto !important;
+  height: auto !important;
+}
+
+.app-old-mirror .chart-wrap,
+.app-old-mirror .donut-wrap,
+.app-old-mirror .chart-panel {
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+/* Tablas: responsive sin romper la página */
+.app-old-mirror table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+}
+
+.app-old-mirror .table-wrap,
+.app-old-mirror .responsive-table,
+.app-old-mirror .data-table-wrap {
+  max-width: 100% !important;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+
+/* Desktop ancho: usar mejor el espacio disponible */
+@media (min-width: 1280px) {
+  .app-old-mirror .app-layout,
+  .app-old-mirror .layout,
+  .app-old-mirror .shell {
+    align-items: stretch !important;
+  }
+
+  .app-old-mirror .section-card,
+  .app-old-mirror .monthly-contribution-card {
+    margin-inline: auto !important;
+  }
+}
+
+/* Tablet: dos columnas donde aporta, una donde estorba */
+@media (max-width: 1180px) {
+  .app-old-mirror .house-pot-head {
+    grid-template-columns: 1fr !important;
+  }
+
+  .app-old-mirror .house-pot-status-card {
+    max-width: 680px !important;
+  }
+
+  .app-old-mirror .house-pot-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .app-old-mirror .house-pot-body {
+    grid-template-columns: 1fr !important;
+  }
+
+  .app-old-mirror .house-pot-expenses .contribution-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Móvil grande y pequeño: una sola columna limpia */
+@media (max-width: 760px) {
+  body {
+    min-width: 0 !important;
+  }
+
+  .app-old-mirror {
+    width: 100% !important;
+  }
+
+  .app-old-mirror main,
+  .app-old-mirror .main,
+  .app-old-mirror .content,
+  .app-old-mirror .content-area,
+  .app-old-mirror .page-content,
+  .app-old-mirror .dashboard-shell {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding-inline: clamp(12px, 4vw, 18px) !important;
+  }
+
+  .app-old-mirror .section-card,
+  .app-old-mirror .panel-card,
+  .app-old-mirror .dashboard-card,
+  .app-old-mirror .monthly-contribution-card,
+  .app-old-mirror .house-pot-card {
+    border-radius: 24px !important;
+    padding: 18px !important;
+  }
+
+  .app-old-mirror h1 {
+    font-size: clamp(2rem, 11vw, 3.1rem) !important;
+    line-height: 1.02 !important;
+  }
+
+  .app-old-mirror h2,
+  .app-old-mirror h3,
+  .app-old-mirror h4 {
+    font-size: clamp(1.35rem, 7vw, 2rem) !important;
+  }
+
+  .app-old-mirror .house-pot-head {
+    gap: 18px !important;
+  }
+
+  .app-old-mirror .house-pot-personal {
+    width: 100% !important;
+    grid-template-columns: 1fr auto !important;
+  }
+
+  .app-old-mirror .house-pot-personal em {
+    grid-column: 1 / -1 !important;
+  }
+
+  .app-old-mirror .house-pot-status-card {
+    grid-template-columns: 1fr !important;
+    max-width: 100% !important;
+  }
+
+  .app-old-mirror .house-pot-status {
+    min-height: 108px !important;
+    padding: 18px !important;
+  }
+
+  .app-old-mirror .house-pot-status.available {
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--f360-border) !important;
+  }
+
+  .app-old-mirror .house-pot-status strong {
+    font-size: clamp(2.15rem, 14vw, 3.65rem) !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .app-old-mirror .house-pot-status em {
+    font-size: .9rem !important;
+  }
+
+  .app-old-mirror .house-pot-stats {
+    grid-template-columns: 1fr !important;
+  }
+
+  .app-old-mirror .house-pot-stats > div {
+    min-height: 90px !important;
+  }
+
+  .app-old-mirror .house-pot-expenses .contribution-list {
+    grid-template-columns: 1fr !important;
+  }
+
+  .app-old-mirror .house-pot-progress {
+    height: 10px !important;
+    margin-block: 12px !important;
+  }
+
+  .app-old-mirror .dashboard-filters,
+  .app-old-mirror .filters-grid,
+  .app-old-mirror .filter-grid,
+  .app-old-mirror .top-controls {
+    grid-template-columns: 1fr !important;
+  }
+
+  .app-old-mirror .action-row,
+  .app-old-mirror .button-row,
+  .app-old-mirror .quick-actions {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+}
+
+/* Teléfonos estrechos: evitar números cortados y cards pegadas */
+@media (max-width: 420px) {
+  .app-old-mirror main,
+  .app-old-mirror .content,
+  .app-old-mirror .page-content {
+    padding-inline: 10px !important;
+  }
+
+  .app-old-mirror .section-card,
+  .app-old-mirror .panel-card,
+  .app-old-mirror .dashboard-card,
+  .app-old-mirror .monthly-contribution-card,
+  .app-old-mirror .house-pot-card {
+    padding: 14px !important;
+    border-radius: 20px !important;
+  }
+
+  .app-old-mirror .house-pot-status {
+    padding: 16px !important;
+  }
+
+  .app-old-mirror .house-pot-status strong {
+    font-size: clamp(2rem, 13vw, 3.1rem) !important;
+  }
+
+  .app-old-mirror .house-pot-person-row,
+  .app-old-mirror .contribution-row {
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+}

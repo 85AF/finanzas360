@@ -2249,14 +2249,13 @@ const F360V3 = (() => {
           <p class="sub">Cada integrante activo aporta ${money(HOUSE_POT_MONTHLY_CONTRIBUTION)}. De ese pote salen alquiler, comida, internet, agua, luz, gas y demás gastos de casa.</p>
           ${personalLine}
         </div>
-        <div class="contribution-big house-pot-big house-pot-split-card">
-          <div class="house-pot-split available">
+        <div class="house-pot-status-card">
+          <div class="house-pot-status available">
             <span>Disponible</span>
             <strong>${money(availableNow)}</strong>
             <em>${escapeHtml(availableHint)}</em>
           </div>
-          <div class="house-pot-divider"></div>
-          <div class="house-pot-split shortfall">
+          <div class="house-pot-status shortfall">
             <span>Faltante</span>
             <strong>${money(shortfallNow)}</strong>
             <em>${escapeHtml(shortfallHint)}</em>
