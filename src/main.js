@@ -2069,8 +2069,12 @@ const F360V3 = (() => {
     const y = Number(String(month).slice(0, 4));
     const selectedMonthNo = Number(String(month).slice(5, 7));
     if (!selectedMonthNo || selectedMonthNo <= 1) return 0;
+
+    // El pote solo arrastra sobrantes reales. Si un mes quedó corto pero se pagó
+    // con aporte extra fuera del sistema, el siguiente mes no debe heredar deuda.
+    // Ejemplo: carry 0 + aporte 900 - gastos 1.100 = 0, no -200.
     return Array.from({ length: selectedMonthNo - 1 }, (_, i) => `${y}-${String(i + 1).padStart(2, "0")}`)
-      .reduce((acc, key) => acc + housePotMonthNet(key), 0);
+      .reduce((carry, key) => Math.max(0, carry + housePotMonthNet(key)), 0);
   }
 
   function housePotRegisteredContribution(memberId, month = activeMonth()) {
