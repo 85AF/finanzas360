@@ -553,6 +553,39 @@
     updateCompactToolbar();
   }
 
+
+  function disableDashboardAccordions(scope = document) {
+    // Evita tarjetas vacías: antes el helper convertía gráficas y resúmenes en acordeones.
+    // Al volver de móvil/tablet a escritorio quedaban cuerpos ocultos por estilos inline/sessionStorage.
+    const root = scope?.querySelectorAll ? scope : document;
+    document.querySelectorAll('.f360-compact-toolbar').forEach((toolbar) => toolbar.remove());
+
+    root.querySelectorAll('.app-old-mirror .section-card.f360-collapsible').forEach((card) => {
+      const toolbar = card.querySelector(':scope > .f360-card-toolbar');
+      const body = card.querySelector(':scope > .f360-collapse-body');
+      const title = toolbar?.querySelector('h4');
+
+      if (title && toolbar) card.insertBefore(title, toolbar);
+      if (body) {
+        body.hidden = false;
+        body.removeAttribute('aria-hidden');
+        body.style.display = '';
+        body.style.height = '';
+        body.style.minHeight = '';
+        body.style.maxHeight = '';
+        body.style.overflow = '';
+        while (body.firstChild) card.appendChild(body.firstChild);
+        body.remove();
+      }
+      toolbar?.remove();
+      card.classList.remove('f360-collapsible', 'f360-collapsed');
+      card.removeAttribute('aria-expanded');
+      delete card.dataset.f360Collapsible;
+      delete card.dataset.f360CollapseTitle;
+      delete card.dataset.f360CollapseKey;
+    });
+  }
+
   function enhanceCollapsibleSections(scope = document) {
     const content = document.querySelector('.app-old-mirror .content-area.old-content');
     if (!content) return;
@@ -629,7 +662,7 @@
     markScrollableAreas(scope);
     enhanceMonthInputs(scope);
     simplifyMonthHistory(scope);
-    enhanceCollapsibleSections(scope);
+    disableDashboardAccordions(scope);
     bindGlobalCompactActions();
   }
 

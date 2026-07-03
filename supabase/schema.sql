@@ -424,11 +424,11 @@ for select using (
   or user_id = auth.uid()
   or member_id = auth.uid()
   or (is_shared = true and public.is_household_member(household_id))
-  or public.has_household_permission(household_id, 'reports', 'view')
 );
 create policy "movements_insert_permission" on public.movements
 for insert with check (
   user_id = auth.uid()
+  and (member_id is null or member_id = auth.uid() or public.is_household_admin(household_id))
   and public.is_household_member(household_id)
   and (
     public.has_household_permission(household_id, 'movements', 'create')
@@ -442,7 +442,11 @@ for update using (
 )
 with check (
   public.is_household_admin(household_id)
-  or (user_id = auth.uid() and public.has_household_permission(household_id, 'movements', 'edit'))
+  or (
+    user_id = auth.uid()
+    and (member_id is null or member_id = auth.uid())
+    and public.has_household_permission(household_id, 'movements', 'edit')
+  )
 );
 create policy "movements_delete_permission" on public.movements
 for delete using (
@@ -463,7 +467,7 @@ for delete using (public.is_household_admin(household_id) or user_id = auth.uid(
 
 -- Políticas: vehicles
 create policy "vehicles_select_permission" on public.vehicles
-for select using (public.is_household_admin(household_id) or public.has_household_permission(household_id, 'vehicles', 'view'));
+for select using (public.is_household_admin(household_id) or owner_id = auth.uid());
 create policy "vehicles_insert_permission" on public.vehicles
 for insert with check (owner_id = auth.uid() and public.has_household_permission(household_id, 'vehicles', 'create'));
 create policy "vehicles_update_permission" on public.vehicles
@@ -474,9 +478,18 @@ for delete using (public.is_household_admin(household_id) or (owner_id = auth.ui
 
 -- Políticas: vehicle_records
 create policy "vehicle_records_select_permission" on public.vehicle_records
-for select using (public.is_household_admin(household_id) or public.has_household_permission(household_id, 'vehicles', 'view'));
+for select using (
+  public.is_household_admin(household_id)
+  or user_id = auth.uid()
+  or responsible_user_id = auth.uid()
+  or exists (select 1 from public.vehicles v where v.id = vehicle_records.vehicle_id and v.owner_id = auth.uid())
+);
 create policy "vehicle_records_insert_permission" on public.vehicle_records
-for insert with check (user_id = auth.uid() and public.has_household_permission(household_id, 'vehicles', 'create'));
+for insert with check (
+  user_id = auth.uid()
+  and (responsible_user_id is null or responsible_user_id = auth.uid() or public.is_household_admin(household_id))
+  and public.has_household_permission(household_id, 'vehicles', 'create')
+);
 create policy "vehicle_records_update_admin" on public.vehicle_records
 for update using (public.is_household_admin(household_id)) with check (public.is_household_admin(household_id));
 create policy "vehicle_records_delete_admin" on public.vehicle_records
@@ -496,3 +509,314 @@ create index if not exists idx_movements_household_date on public.movements(hous
 create index if not exists idx_movements_user on public.movements(user_id);
 create index if not exists idx_movements_member on public.movements(member_id);
 create index if not exists idx_invitations_email on public.invitations(lower(invited_email));
+
+-- -----------------------------------------------------------------------------
+-- Consolidado limpio de upgrades anteriores
+-- Este bloque deja el esquema base al día sin tener que conservar archivos
+-- upgrade_*.sql ni rollback_*.sql en la carpeta final.
+-- -----------------------------------------------------------------------------
+
+-- Normalizar estados antiguos si existían.
+update public.household_members
+set status = 'disabled'
+where status = 'inactive';
+
+alter table public.household_members drop constraint if exists household_members_status_check;
+alter table public.household_members
+  add constraint household_members_status_check check (status in ('active','disabled'));
+
+-- Categorías con presupuesto mensual.
+alter table public.categories add column if not exists budget numeric(12,2) default 0;
+
+-- Movimientos enriquecidos.
+alter table public.movements add column if not exists notes text;
+alter table public.movements add column if not exists kind text default 'personal';
+alter table public.movements add column if not exists share_method text default 'none';
+alter table public.movements add column if not exists share_details jsonb default '{}'::jsonb;
+
+-- Miembros del hogar con datos extendidos.
+alter table public.household_members add column if not exists display_name text;
+alter table public.household_members add column if not exists household_type text default 'family';
+alter table public.household_members add column if not exists participation_percent numeric(7,2);
+alter table public.household_members add column if not exists works boolean default true;
+alter table public.household_members add column if not exists contributes_income boolean default true;
+alter table public.household_members add column if not exists dependent boolean default false;
+
+-- Metas mejoradas.
+alter table public.goals add column if not exists emoji text default '🎯';
+alter table public.goals add column if not exists notes text;
+
+-- Recurrentes / servicios variables / deudas.
+create table if not exists public.recurring_movements (
+  id uuid primary key default gen_random_uuid(),
+  household_id uuid not null references public.households(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  member_id uuid references auth.users(id) on delete set null,
+  type text not null default 'expense' check (type in ('income','expense')),
+  category_id uuid references public.categories(id) on delete set null,
+  amount numeric(12,2) not null default 0,
+  description text,
+  day_of_month integer default 1,
+  frequency text default 'monthly',
+  active boolean default true,
+  is_shared boolean default false,
+  start_date date default current_date,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.recurring_movements add column if not exists kind text default 'fixed';
+alter table public.recurring_movements add column if not exists amount_mode text default 'fixed';
+alter table public.recurring_movements add column if not exists end_mode text default 'indefinite';
+alter table public.recurring_movements add column if not exists fixed_months integer;
+alter table public.recurring_movements add column if not exists fixed_years integer;
+alter table public.recurring_movements add column if not exists end_date date;
+alter table public.recurring_movements add column if not exists debt_original_amount numeric(12,2);
+alter table public.recurring_movements add column if not exists debt_lender text;
+alter table public.recurring_movements add column if not exists first_payment_date date;
+alter table public.recurring_movements add column if not exists last_payment_date date;
+alter table public.recurring_movements add column if not exists notes text;
+alter table public.recurring_movements add column if not exists share_method text default 'equal';
+alter table public.recurring_movements add column if not exists share_details jsonb default '{}'::jsonb;
+
+-- Vehículos completos.
+alter table public.vehicles add column if not exists brand text;
+alter table public.vehicles add column if not exists model text;
+alter table public.vehicles add column if not exists year integer;
+alter table public.vehicles add column if not exists km integer;
+alter table public.vehicles add column if not exists status text default 'activo';
+alter table public.vehicles add column if not exists notes text;
+
+-- Historial vehículo / seguros financiados / avisos.
+alter table public.vehicle_records add column if not exists concept text;
+alter table public.vehicle_records add column if not exists status text default 'realizado';
+alter table public.vehicle_records add column if not exists km integer;
+alter table public.vehicle_records add column if not exists next_date date;
+alter table public.vehicle_records add column if not exists next_km integer;
+alter table public.vehicle_records add column if not exists provider text;
+alter table public.vehicle_records add column if not exists insurance_company text;
+alter table public.vehicle_records add column if not exists payment_mode text default 'cash';
+alter table public.vehicle_records add column if not exists coverage_end date;
+alter table public.vehicle_records add column if not exists installment_day integer;
+alter table public.vehicle_records add column if not exists installment_count integer;
+alter table public.vehicle_records add column if not exists installment_amount numeric(12,2);
+alter table public.vehicle_records add column if not exists installments_json jsonb default '[]'::jsonb;
+alter table public.vehicle_records add column if not exists responsible_user_id uuid references auth.users(id) on delete set null;
+
+-- Permisos finales usados por la app.
+create or replace function public.default_permissions_for_role(p_role text)
+returns table(module text, can_view boolean, can_create boolean, can_edit boolean, can_delete boolean)
+language sql
+stable
+as $$
+  select * from (values
+    ('dashboard', true,  false, false, false),
+    ('categories', true, p_role = 'member', p_role = 'member', false),
+    ('members', p_role <> 'viewer', p_role = 'admin', p_role = 'admin', p_role = 'admin'),
+    ('household', true,  false, false, false),
+    ('register',  p_role <> 'viewer', p_role <> 'viewer', false, false),
+    ('vehicles', true, p_role <> 'viewer', p_role <> 'viewer', false),
+    ('movements', true,  p_role <> 'viewer', p_role <> 'viewer', false),
+    ('goals', true, p_role <> 'viewer', p_role <> 'viewer', p_role <> 'viewer'),
+    ('history', true, false, false, false),
+    ('backup', true, false, false, false),
+    ('recurring', true, p_role <> 'viewer', p_role <> 'viewer', false),
+    ('reports', p_role <> 'viewer', false, false, false),
+    ('admin', false, false, false, false)
+  ) as x(module, can_view, can_create, can_edit, can_delete)
+$$;
+
+create or replace function public.ensure_member_permissions()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.role = 'admin' then
+    insert into public.permissions(household_id, user_id, module, can_view, can_create, can_edit, can_delete)
+    select new.household_id, new.user_id, module, true, true, true, true
+    from (values
+      ('dashboard'),('categories'),('members'),('household'),('register'),('vehicles'),('movements'),('goals'),('history'),('backup'),('recurring'),('reports'),('admin')
+    ) as modules(module)
+    on conflict (household_id, user_id, module) do update set
+      can_view = true,
+      can_create = true,
+      can_edit = true,
+      can_delete = true,
+      updated_at = now();
+  else
+    insert into public.permissions(household_id, user_id, module, can_view, can_create, can_edit, can_delete)
+    select new.household_id, new.user_id, module, can_view, can_create, can_edit, can_delete
+    from public.default_permissions_for_role(new.role)
+    on conflict (household_id, user_id, module) do nothing;
+  end if;
+  return new;
+end;
+$$;
+
+insert into public.permissions(household_id, user_id, module, can_view, can_create, can_edit, can_delete)
+select hm.household_id, hm.user_id, d.module, d.can_view, d.can_create, d.can_edit, d.can_delete
+from public.household_members hm
+cross join lateral public.default_permissions_for_role(hm.role) d
+on conflict (household_id, user_id, module) do nothing;
+
+update public.permissions p
+set can_view = true, can_create = true, can_edit = true, can_delete = true, updated_at = now()
+from public.household_members hm
+where hm.household_id = p.household_id
+  and hm.user_id = p.user_id
+  and hm.role = 'admin'
+  and p.module in ('dashboard','categories','members','household','register','vehicles','movements','goals','history','backup','recurring','reports','admin');
+
+-- RLS, triggers, políticas e índices de recurrentes.
+alter table public.recurring_movements enable row level security;
+
+drop trigger if exists touch_recurring_updated on public.recurring_movements;
+create trigger touch_recurring_updated before update on public.recurring_movements for each row execute function public.touch_updated_at();
+
+drop policy if exists "recurring_select_by_role" on public.recurring_movements;
+drop policy if exists "recurring_insert_permission" on public.recurring_movements;
+drop policy if exists "recurring_update_permission" on public.recurring_movements;
+drop policy if exists "recurring_delete_permission" on public.recurring_movements;
+
+create policy "recurring_select_by_role" on public.recurring_movements
+for select using (
+  public.is_household_member(household_id)
+  and (
+    public.is_household_admin(household_id)
+    or user_id = auth.uid()
+    or member_id = auth.uid()
+    or (is_shared = true and public.is_household_member(household_id))
+  )
+);
+
+create policy "recurring_insert_permission" on public.recurring_movements
+for insert with check (
+  user_id = auth.uid()
+  and (member_id is null or member_id = auth.uid() or public.is_household_admin(household_id))
+  and public.has_household_permission(household_id, 'recurring', 'create')
+);
+
+create policy "recurring_update_permission" on public.recurring_movements
+for update using (
+  public.is_household_admin(household_id)
+  or (user_id = auth.uid() and public.has_household_permission(household_id, 'recurring', 'edit'))
+) with check (
+  public.is_household_admin(household_id)
+  or (
+    user_id = auth.uid()
+    and (member_id is null or member_id = auth.uid())
+    and public.has_household_permission(household_id, 'recurring', 'edit')
+  )
+);
+
+create policy "recurring_delete_permission" on public.recurring_movements
+for delete using (
+  public.is_household_admin(household_id)
+  or (user_id = auth.uid() and public.has_household_permission(household_id, 'recurring', 'delete'))
+);
+
+create index if not exists idx_recurring_household on public.recurring_movements(household_id);
+create index if not exists idx_recurring_member on public.recurring_movements(member_id);
+create index if not exists idx_movements_household_month on public.movements(household_id, date);
+create index if not exists idx_vehicle_records_household_date on public.vehicle_records(household_id, date);
+create index if not exists idx_vehicle_records_vehicle_date on public.vehicle_records(vehicle_id, date desc);
+create index if not exists idx_vehicle_records_next_date on public.vehicle_records(next_date);
+
+
+-- =============================================================
+-- Patch de privacidad por integrante
+-- Reejecutable: asegura que solo admin vea todo; miembros ven lo propio + compartido.
+-- =============================================================
+
+drop policy if exists "movements_select_by_role" on public.movements;
+create policy "movements_select_by_role" on public.movements
+for select using (
+  public.is_household_admin(household_id)
+  or user_id = auth.uid()
+  or member_id = auth.uid()
+  or (is_shared = true and public.is_household_member(household_id))
+);
+
+drop policy if exists "movements_insert_permission" on public.movements;
+create policy "movements_insert_permission" on public.movements
+for insert with check (
+  user_id = auth.uid()
+  and (member_id is null or member_id = auth.uid() or public.is_household_admin(household_id))
+  and public.is_household_member(household_id)
+  and (
+    public.has_household_permission(household_id, 'movements', 'create')
+    or public.has_household_permission(household_id, 'register', 'create')
+  )
+);
+
+drop policy if exists "movements_update_permission" on public.movements;
+create policy "movements_update_permission" on public.movements
+for update using (
+  public.is_household_admin(household_id)
+  or (user_id = auth.uid() and public.has_household_permission(household_id, 'movements', 'edit'))
+)
+with check (
+  public.is_household_admin(household_id)
+  or (
+    user_id = auth.uid()
+    and (member_id is null or member_id = auth.uid())
+    and public.has_household_permission(household_id, 'movements', 'edit')
+  )
+);
+
+drop policy if exists "recurring_select_by_role" on public.recurring_movements;
+create policy "recurring_select_by_role" on public.recurring_movements
+for select using (
+  public.is_household_member(household_id)
+  and (
+    public.is_household_admin(household_id)
+    or user_id = auth.uid()
+    or member_id = auth.uid()
+    or (is_shared = true and public.is_household_member(household_id))
+  )
+);
+
+drop policy if exists "recurring_insert_permission" on public.recurring_movements;
+create policy "recurring_insert_permission" on public.recurring_movements
+for insert with check (
+  user_id = auth.uid()
+  and (member_id is null or member_id = auth.uid() or public.is_household_admin(household_id))
+  and public.has_household_permission(household_id, 'recurring', 'create')
+);
+
+drop policy if exists "recurring_update_permission" on public.recurring_movements;
+create policy "recurring_update_permission" on public.recurring_movements
+for update using (
+  public.is_household_admin(household_id)
+  or (user_id = auth.uid() and public.has_household_permission(household_id, 'recurring', 'edit'))
+) with check (
+  public.is_household_admin(household_id)
+  or (
+    user_id = auth.uid()
+    and (member_id is null or member_id = auth.uid())
+    and public.has_household_permission(household_id, 'recurring', 'edit')
+  )
+);
+
+drop policy if exists "vehicles_select_permission" on public.vehicles;
+create policy "vehicles_select_permission" on public.vehicles
+for select using (public.is_household_admin(household_id) or owner_id = auth.uid());
+
+drop policy if exists "vehicle_records_select_permission" on public.vehicle_records;
+create policy "vehicle_records_select_permission" on public.vehicle_records
+for select using (
+  public.is_household_admin(household_id)
+  or user_id = auth.uid()
+  or responsible_user_id = auth.uid()
+  or exists (select 1 from public.vehicles v where v.id = vehicle_records.vehicle_id and v.owner_id = auth.uid())
+);
+
+drop policy if exists "vehicle_records_insert_permission" on public.vehicle_records;
+create policy "vehicle_records_insert_permission" on public.vehicle_records
+for insert with check (
+  user_id = auth.uid()
+  and (responsible_user_id is null or responsible_user_id = auth.uid() or public.is_household_admin(household_id))
+  and public.has_household_permission(household_id, 'vehicles', 'create')
+);

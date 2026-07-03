@@ -8401,3 +8401,1015 @@ canvas {
     grid-template-columns: 1fr !important;
   }
 }
+
+/* Finanzas 360 · Meses activos responsive
+   Desktop: muestra todos los meses del año hasta el mes actual.
+   Tablet/móvil: muestra solo el mes activo y deja el resto en una lista. */
+.app-old-mirror .mobile-month-select {
+  display: none !important;
+}
+
+@media (max-width: 1180px) {
+  .app-old-mirror .month-history-card .month-card-header {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    align-items: stretch !important;
+    gap: 14px !important;
+  }
+
+  .app-old-mirror .month-history-card .month-card-actions {
+    justify-content: stretch !important;
+    text-align: left !important;
+    width: 100% !important;
+  }
+
+  .app-old-mirror .month-history-card .desktop-month-hint {
+    display: none !important;
+  }
+
+  .app-old-mirror .mobile-month-select {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+  }
+
+  .app-old-mirror .mobile-month-select label {
+    margin-bottom: 7px !important;
+  }
+
+  .app-old-mirror .mobile-month-select select {
+    width: 100% !important;
+  }
+
+  .app-old-mirror .month-strip.f360-month-progress {
+    display: block !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  .app-old-mirror .month-strip.f360-month-progress .month-pill {
+    display: none !important;
+  }
+
+  .app-old-mirror .month-strip.f360-month-progress .month-pill.active {
+    display: flex !important;
+    width: 100% !important;
+    min-height: 82px !important;
+    margin: 0 !important;
+  }
+}
+
+
+/* Finanzas 360 · Ajuste final pedido por Alberto
+   - Tablet/móvil: el bloque de meses activos muestra solo el mes activo + selector.
+   - Evita duplicados creados por la tira original, el selector agregado y el panel móvil.
+   - El centro financiero queda organizado como bloque de tips debajo de las gráficas. */
+.app-old-mirror .month-history-card .mobile-month-select {
+  display: none !important;
+}
+
+@media (max-width: 1180px) {
+  .app-old-mirror .month-history-card {
+    display: grid !important;
+    gap: 12px !important;
+  }
+
+  .app-old-mirror .month-history-card .month-card-header {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+    margin-bottom: 0 !important;
+    text-align: left !important;
+  }
+
+  .app-old-mirror .month-history-card .month-card-actions {
+    display: none !important;
+  }
+
+  .app-old-mirror .month-history-card > .month-strip.f360-month-progress,
+  .app-old-mirror .month-history-card > .month-strip.f360-month-progress.f360-month-original,
+  .app-old-mirror .month-history-card .month-strip.f360-month-progress {
+    display: none !important;
+  }
+
+  .app-old-mirror .month-history-card > .f360-month-mobile-panel {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px !important;
+    margin-top: 0 !important;
+  }
+
+  .app-old-mirror .month-history-card .f360-month-current {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    align-items: center !important;
+    gap: 10px !important;
+    min-height: 76px !important;
+    padding: 14px 16px !important;
+    border-radius: 20px !important;
+  }
+
+  .app-old-mirror .month-history-card .f360-month-current strong,
+  .app-old-mirror .month-history-card .f360-month-current span {
+    display: block !important;
+    white-space: normal !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .app-old-mirror .month-history-card .f360-month-current strong {
+    margin-bottom: 4px !important;
+    line-height: 1.15 !important;
+  }
+
+  .app-old-mirror .month-history-card .f360-month-select {
+    width: 100% !important;
+    min-height: 52px !important;
+    border-radius: 18px !important;
+  }
+}
+
+@media (min-width: 1181px) {
+  .app-old-mirror .month-history-card > .f360-month-mobile-panel {
+    display: none !important;
+  }
+}
+
+.app-old-mirror .v6-financial-coach {
+  margin-top: clamp(20px, 2.4vw, 34px) !important;
+  padding: clamp(18px, 2.2vw, 28px) !important;
+}
+
+.app-old-mirror .v6-financial-coach .finance-coach-head {
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+  margin-bottom: 18px !important;
+}
+
+.app-old-mirror .v6-financial-coach .finance-coach-head .section-icon-row {
+  margin: 0 !important;
+  min-width: 0 !important;
+}
+
+.app-old-mirror .v6-financial-coach .finance-demo-btn {
+  flex: 0 0 auto !important;
+  white-space: nowrap !important;
+}
+
+.app-old-mirror .v6-financial-coach .finance-coach-controls {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+  margin: 0 0 18px !important;
+}
+
+.app-old-mirror .v6-financial-coach .finance-coach-summary {
+  display: grid !important;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+  margin-bottom: 18px !important;
+}
+
+.app-old-mirror .v6-financial-coach .finance-coach-summary .coach-kpi {
+  min-height: 118px !important;
+}
+
+.app-old-mirror .v6-financial-coach .finance-coach-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 14px !important;
+}
+
+.app-old-mirror .v6-financial-coach .coach-panel {
+  min-width: 0 !important;
+  border-radius: 20px !important;
+  padding: 16px !important;
+}
+
+.app-old-mirror .v6-financial-coach .coach-panel h5 {
+  margin-top: 0 !important;
+  margin-bottom: 6px !important;
+}
+
+@media (max-width: 1180px) {
+  .app-old-mirror .v6-financial-coach .finance-coach-head {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .app-old-mirror .v6-financial-coach .finance-demo-btn {
+    width: 100% !important;
+  }
+
+  .app-old-mirror .v6-financial-coach .finance-coach-controls,
+  .app-old-mirror .v6-financial-coach .finance-coach-summary,
+  .app-old-mirror .v6-financial-coach .finance-coach-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .app-old-mirror .v6-financial-coach .finance-coach-summary .coach-kpi {
+    min-height: 0 !important;
+  }
+}
+
+@media (min-width: 1181px) and (max-width: 1460px) {
+  .app-old-mirror .v6-financial-coach .finance-coach-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Finanzas 360 · ajuste final móvil/tablet
+   En pantallas pequeñas el selector principal "Mes activo" ya cumple la función
+   de elegir el mes. Por eso se oculta el bloque "Meses activos" del dashboard
+   para evitar información duplicada. En ordenador se mantiene visible completo. */
+@media (max-width: 1180px) {
+  .app-old-mirror .old-period > .month-history-card {
+    display: none !important;
+  }
+}
+
+
+/* ==========================================================
+   F29 · Limpieza de espacios muertos en dashboard
+   - No más tarjetas vacías por acordeones heredados.
+   - Las tarjetas con poca información no se estiran para igualar a la vecina.
+   - Mantiene el mismo look; solo corrige altura, flujo y visibilidad.
+========================================================== */
+.app-old-mirror .f360-compact-toolbar,
+.app-old-mirror .f360-card-toolbar .f360-collapse-toggle {
+  display: none !important;
+}
+
+.app-old-mirror .section-card.f360-collapsible,
+.app-old-mirror .section-card.f360-collapsed {
+  display: block !important;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.app-old-mirror .section-card.f360-collapsible > .f360-collapse-body,
+.app-old-mirror .section-card.f360-collapsed > .f360-collapse-body {
+  display: block !important;
+  visibility: visible !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.app-old-mirror .old-dashboard-grid,
+.app-old-mirror .analytics-main-grid,
+.app-old-mirror .analytics-compare-grid,
+.app-old-mirror .grid-2.old-dashboard-grid {
+  align-items: start !important;
+  align-content: start !important;
+  grid-auto-rows: auto !important;
+}
+
+.app-old-mirror .old-dashboard-grid .section-card,
+.app-old-mirror .analytics-main-grid .section-card,
+.app-old-mirror .analytics-compare-grid .section-card,
+.app-old-mirror .grid-2.old-dashboard-grid .section-card,
+.app-old-mirror .chart-card-large,
+.app-old-mirror .compact-card,
+.app-old-mirror .analytics-compare-grid .section-card:has(.dual-donut-grid),
+.app-old-mirror .section-card:has(.indicator-grid),
+.app-old-mirror .section-card:has(.advice-list),
+.app-old-mirror .section-card:has(.dual-donut-grid),
+.app-old-mirror .section-card:has(.category-compare-table),
+.app-old-mirror .section-card:has(.compare-bars-panel) {
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  align-self: start !important;
+}
+
+.app-old-mirror .indicator-grid,
+.app-old-mirror .advice-list,
+.app-old-mirror .dual-donut-grid,
+.app-old-mirror .compare-kpi-grid,
+.app-old-mirror .compare-bars-panel,
+.app-old-mirror .category-compare-table,
+.app-old-mirror .ytd-bars,
+.app-old-mirror .coach-summary-grid,
+.app-old-mirror .action-plan-list,
+.app-old-mirror .priority-list {
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+}
+
+.app-old-mirror .analytics-side-stack {
+  align-items: start !important;
+  align-content: start !important;
+  grid-auto-rows: auto !important;
+}
+
+.app-old-mirror .mini-donut-card,
+.app-old-mirror .donut-layout,
+.app-old-mirror .donut-empty,
+.app-old-mirror .reading-box {
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+}
+
+@media (min-width: 1181px) {
+  .app-old-mirror .old-dashboard-grid,
+  .app-old-mirror .analytics-main-grid,
+  .app-old-mirror .analytics-compare-grid {
+    margin-bottom: 18px !important;
+  }
+
+  .app-old-mirror .section-card:has(.indicator-grid),
+  .app-old-mirror .section-card:has(.advice-list) {
+    padding-bottom: 22px !important;
+  }
+}
+
+/* F30 · Centro financiero sin duplicados
+   El resumen y el plan de acción viven dentro del Centro financiero inteligente.
+   Se elimina el bloque suelto anterior del dashboard y se mantiene el look original. */
+.app-old-mirror .v6-financial-coach .finance-summary-panel {
+  margin-bottom: 16px !important;
+}
+
+.app-old-mirror .v6-financial-coach .finance-summary-panel .finance-coach-summary {
+  margin-bottom: 0 !important;
+}
+
+/* =========================================================
+   Patch UX: ayuda contextual + historial sin duplicar movimientos
+   ========================================================= */
+.app-old-mirror .app-section-guide {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 12px 0 18px;
+  padding: 12px 16px;
+  border-radius: 20px;
+  background: rgba(255,255,255,.44);
+  border: 1px solid rgba(255,255,255,.56);
+  box-shadow: 0 16px 36px rgba(15,23,42,.08), inset 0 1px 0 rgba(255,255,255,.68);
+  color: var(--muted);
+}
+
+.app-old-mirror .app-section-guide span {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(255,255,255,.55);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.7);
+}
+
+.app-old-mirror .app-section-guide small {
+  display: block;
+  line-height: 1.55;
+  font-size: .86rem;
+  color: var(--muted);
+}
+
+.app-old-mirror .history-insight-card,
+.app-old-mirror .history-cats-card {
+  min-height: unset !important;
+}
+
+.app-old-mirror .history-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.app-old-mirror .history-kpi-grid > div {
+  padding: 16px;
+  border-radius: 20px;
+  background: rgba(255,255,255,.36);
+  border: 1px solid rgba(255,255,255,.58);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.65);
+}
+
+.app-old-mirror .history-kpi-grid span,
+.app-old-mirror .history-category-row span {
+  display: block;
+  color: var(--muted);
+  font-size: .78rem;
+  margin-bottom: 6px;
+}
+
+.app-old-mirror .history-kpi-grid strong {
+  display: block;
+  color: var(--text);
+  font-size: clamp(1.05rem, 2vw, 1.45rem);
+}
+
+.app-old-mirror .history-actions {
+  margin-top: 18px;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.app-old-mirror .history-category-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.app-old-mirror .history-category-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255,255,255,.36);
+  border: 1px solid rgba(255,255,255,.56);
+}
+
+.app-old-mirror .history-category-row b {
+  white-space: nowrap;
+  color: var(--text);
+}
+
+html[data-f360-theme="dark"] .app-old-mirror .app-section-guide,
+body[data-f360-theme="dark"] .app-old-mirror .app-section-guide,
+html[data-f360-theme="dark"] .app-old-mirror .history-kpi-grid > div,
+body[data-f360-theme="dark"] .app-old-mirror .history-kpi-grid > div,
+html[data-f360-theme="dark"] .app-old-mirror .history-category-row,
+body[data-f360-theme="dark"] .app-old-mirror .history-category-row {
+  background: rgba(15,23,42,.52);
+  border-color: rgba(148,163,184,.24);
+}
+
+@media (max-width: 900px) {
+  .app-old-mirror .history-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .app-old-mirror .app-section-guide {
+    margin: 10px 0 14px;
+    padding: 11px 13px;
+    border-radius: 18px;
+  }
+
+  .app-old-mirror .history-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-old-mirror .history-actions .btn {
+    width: 100%;
+  }
+}
+
+/* ==========================================================
+   V16 · APORTE MENSUAL SIN DUPLICAR KPI
+   Sustituye las tarjetas repetidas del inicio por una lectura clara
+   del aporte de casa que le toca a la persona seleccionada.
+========================================================== */
+.app-old-mirror .monthly-contribution-card {
+  margin: 18px 0 22px !important;
+}
+
+.app-old-mirror .contribution-head {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px) !important;
+  gap: 18px !important;
+  align-items: stretch !important;
+}
+
+.app-old-mirror .contribution-head h4 {
+  font-size: clamp(1.15rem, 2vw, 1.65rem) !important;
+  margin: 10px 0 8px !important;
+}
+
+.app-old-mirror .contribution-big {
+  border-radius: 28px !important;
+  padding: 22px !important;
+  background:
+    radial-gradient(circle at 100% 100%, rgba(85,206,242,.18), transparent 36%),
+    var(--f360-surface) !important;
+  border: 1px solid var(--f360-border) !important;
+  box-shadow: var(--f360-outset-soft) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  min-height: 150px !important;
+}
+
+.app-old-mirror .contribution-big span,
+.app-old-mirror .contribution-mini span {
+  font-size: .78rem !important;
+  font-weight: 950 !important;
+  letter-spacing: .05em !important;
+  text-transform: uppercase !important;
+  color: var(--f360-muted) !important;
+}
+
+.app-old-mirror .contribution-big strong {
+  font-size: clamp(2.45rem, 5vw, 4.6rem) !important;
+  line-height: .95 !important;
+  letter-spacing: -.07em !important;
+  color: var(--f360-text-strong) !important;
+  margin: 8px 0 !important;
+}
+
+.app-old-mirror .contribution-big em {
+  color: var(--f360-muted) !important;
+  font-size: .95rem !important;
+}
+
+.app-old-mirror .contribution-body {
+  display: grid !important;
+  grid-template-columns: minmax(280px, .72fr) minmax(0, 1.28fr) !important;
+  gap: 18px !important;
+  margin-top: 18px !important;
+  align-items: start !important;
+}
+
+.app-old-mirror .contribution-summary,
+.app-old-mirror .contribution-row,
+.app-old-mirror .contribution-mini {
+  background: var(--f360-surface) !important;
+  color: var(--f360-text) !important;
+  border: 1px solid var(--f360-border) !important;
+  box-shadow: var(--f360-outset-soft) !important;
+  border-radius: 22px !important;
+}
+
+.app-old-mirror .contribution-summary {
+  padding: 20px !important;
+  line-height: 1.55 !important;
+}
+
+.app-old-mirror .contribution-summary b {
+  display: block !important;
+  font-size: 1rem !important;
+  color: var(--f360-text-strong) !important;
+}
+
+.app-old-mirror .contribution-mini {
+  margin-top: 14px !important;
+  padding: 16px !important;
+  display: flex !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+  align-items: center !important;
+}
+
+.app-old-mirror .contribution-mini strong {
+  font-size: 1.35rem !important;
+  color: var(--f360-text-strong) !important;
+}
+
+.app-old-mirror .contribution-list {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(220px, 1fr)) !important;
+  gap: 12px !important;
+}
+
+.app-old-mirror .contribution-row {
+  padding: 16px 18px !important;
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  gap: 14px !important;
+}
+
+.app-old-mirror .contribution-row span {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  min-width: 0 !important;
+}
+
+.app-old-mirror .contribution-row b {
+  color: var(--f360-text-strong) !important;
+  font-size: .95rem !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 260px !important;
+}
+
+.app-old-mirror .contribution-row em {
+  color: var(--f360-muted) !important;
+  font-size: .78rem !important;
+}
+
+.app-old-mirror .contribution-row strong {
+  color: var(--f360-text-strong) !important;
+  font-size: 1.08rem !important;
+  white-space: nowrap !important;
+}
+
+.app-old-mirror .dashboard-year-grid {
+  display: block !important;
+  margin: 18px 0 !important;
+}
+
+@media (max-width: 1100px) {
+  .app-old-mirror .contribution-head,
+  .app-old-mirror .contribution-body {
+    grid-template-columns: 1fr !important;
+  }
+  .app-old-mirror .contribution-list {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .app-old-mirror .monthly-contribution-card {
+    padding: 18px !important;
+  }
+  .app-old-mirror .contribution-big {
+    min-height: 126px !important;
+  }
+  .app-old-mirror .contribution-row {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+  }
+  .app-old-mirror .contribution-row b {
+    max-width: 100% !important;
+  }
+}
+
+/* ==========================================================
+   F31 · Dashboard Inicio sin duplicados + UX responsive
+   - Una sola lectura por tipo de información.
+   - Aporte mensual como bloque prioritario.
+   - Gráficas y comparadores ordenados por jerarquía visual.
+========================================================== */
+.app-old-mirror .ux-dashboard-main-grid,
+.app-old-mirror .ux-executive-grid,
+.app-old-mirror .ux-detail-grid {
+  align-items: start !important;
+  grid-auto-rows: auto !important;
+  margin-bottom: 18px !important;
+}
+
+.app-old-mirror .ux-dashboard-main-grid {
+  grid-template-columns: minmax(0, 1.28fr) minmax(360px, .72fr) !important;
+}
+
+.app-old-mirror .ux-executive-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+}
+
+.app-old-mirror .ux-detail-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.app-old-mirror .ux-primary-chart,
+.app-old-mirror .ux-category-card,
+.app-old-mirror .ux-year-summary-card,
+.app-old-mirror .ux-month-compare-card,
+.app-old-mirror .ux-category-compare-card {
+  min-height: 0 !important;
+  height: auto !important;
+  align-self: start !important;
+}
+
+.app-old-mirror .ux-category-card {
+  display: grid !important;
+  gap: 14px !important;
+}
+
+.app-old-mirror .ux-category-card .old-bar-list {
+  display: grid !important;
+  gap: 12px !important;
+}
+
+.app-old-mirror .ux-year-summary-card {
+  display: grid !important;
+  gap: 16px !important;
+}
+
+.app-old-mirror .ux-indicator-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  margin-top: 6px !important;
+}
+
+.app-old-mirror .ux-year-summary-card .ytd-bars {
+  min-height: 210px !important;
+  height: auto !important;
+  padding: 18px 16px 12px !important;
+  border-radius: 26px !important;
+  background: var(--f360-surface) !important;
+  border: 1px solid var(--f360-border) !important;
+  box-shadow: var(--f360-inset-soft) !important;
+}
+
+.app-old-mirror .ux-month-compare-card .compare-kpi-grid,
+.app-old-mirror .ux-month-compare-card .compare-bars-panel,
+.app-old-mirror .ux-category-compare-card .category-compare-table {
+  margin-top: 14px !important;
+}
+
+.app-old-mirror .ux-category-compare-card .category-compare-table {
+  overflow: hidden !important;
+}
+
+.app-old-mirror .ux-category-compare-card {
+  max-width: none !important;
+}
+
+/* Limpieza visual: evita aire muerto cuando un bloque tiene menos contenido que el vecino. */
+.app-old-mirror .ux-dashboard-main-grid > *,
+.app-old-mirror .ux-executive-grid > *,
+.app-old-mirror .ux-detail-grid > * {
+  align-self: start !important;
+}
+
+@media (max-width: 1180px) {
+  .app-old-mirror .ux-dashboard-main-grid,
+  .app-old-mirror .ux-executive-grid,
+  .app-old-mirror .ux-detail-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .app-old-mirror .ux-indicator-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 1180px) {
+  .app-old-mirror .ux-dashboard-main-grid,
+  .app-old-mirror .ux-executive-grid,
+  .app-old-mirror .ux-detail-grid {
+    gap: 18px !important;
+  }
+
+  .app-old-mirror .ux-category-card,
+  .app-old-mirror .ux-year-summary-card,
+  .app-old-mirror .ux-month-compare-card,
+  .app-old-mirror .ux-category-compare-card {
+    padding: 22px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-old-mirror .old-title-row h3 {
+    font-size: clamp(1.35rem, 7vw, 2.05rem) !important;
+  }
+
+  .app-old-mirror .ux-dashboard-main-grid,
+  .app-old-mirror .ux-executive-grid,
+  .app-old-mirror .ux-detail-grid {
+    gap: 14px !important;
+    margin-bottom: 14px !important;
+  }
+
+  .app-old-mirror .ux-category-card,
+  .app-old-mirror .ux-year-summary-card,
+  .app-old-mirror .ux-month-compare-card,
+  .app-old-mirror .ux-category-compare-card {
+    padding: 18px !important;
+    border-radius: 26px !important;
+  }
+
+  .app-old-mirror .ux-indicator-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .app-old-mirror .ux-year-summary-card .ytd-bars {
+    min-height: 180px !important;
+    padding: 14px 12px 10px !important;
+  }
+
+  .app-old-mirror .ux-month-compare-card .compare-kpi-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .app-old-mirror .ux-category-compare-card .category-compare-table {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .app-old-mirror .ux-category-compare-card .cat-row {
+    min-width: 520px !important;
+  }
+}
+
+/* ==========================================================
+   F32 · Pote del hogar / fondo común mensual
+   450 € por integrante activo, sobrante acumulado y gastos comunes.
+========================================================== */
+.app-old-mirror .house-pot-card {
+  overflow: hidden !important;
+}
+
+.app-old-mirror .house-pot-head h4 {
+  font-size: clamp(1.35rem, 2.3vw, 2rem) !important;
+}
+
+.app-old-mirror .house-pot-big.ok strong {
+  color: var(--f360-ok, #25a56a) !important;
+}
+
+.app-old-mirror .house-pot-big.gold strong {
+  color: #d88a16 !important;
+}
+
+.app-old-mirror .house-pot-big.danger strong {
+  color: var(--f360-danger, #ef5670) !important;
+}
+
+.app-old-mirror .house-pot-personal {
+  margin-top: 16px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  flex-wrap: wrap !important;
+  padding: 13px 16px !important;
+  border-radius: 20px !important;
+  background: var(--f360-surface) !important;
+  border: 1px solid var(--f360-border) !important;
+  box-shadow: var(--f360-outset-soft) !important;
+}
+
+.app-old-mirror .house-pot-personal span,
+.app-old-mirror .house-pot-stats span {
+  color: var(--f360-muted) !important;
+  font-size: .78rem !important;
+  font-weight: 950 !important;
+  text-transform: uppercase !important;
+  letter-spacing: .045em !important;
+}
+
+.app-old-mirror .house-pot-personal strong {
+  color: var(--f360-text-strong) !important;
+  font-size: 1.3rem !important;
+}
+
+.app-old-mirror .house-pot-personal em {
+  color: var(--f360-muted) !important;
+  font-style: normal !important;
+}
+
+.app-old-mirror .house-pot-stats {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(160px, 1fr)) !important;
+  gap: 12px !important;
+  margin-top: 18px !important;
+}
+
+.app-old-mirror .house-pot-stats > div {
+  padding: 16px !important;
+  border-radius: 22px !important;
+  background: var(--f360-surface) !important;
+  border: 1px solid var(--f360-border) !important;
+  box-shadow: var(--f360-outset-soft) !important;
+  min-height: 112px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  gap: 6px !important;
+}
+
+.app-old-mirror .house-pot-stats strong {
+  color: var(--f360-text-strong) !important;
+  font-size: clamp(1.35rem, 2.3vw, 2rem) !important;
+  line-height: 1 !important;
+}
+
+.app-old-mirror .house-pot-stats em {
+  color: var(--f360-muted) !important;
+  font-size: .82rem !important;
+  font-style: normal !important;
+}
+
+.app-old-mirror .house-pot-progress {
+  height: 13px !important;
+  margin: 15px 0 4px !important;
+  border-radius: 999px !important;
+  background: var(--f360-surface) !important;
+  border: 1px solid var(--f360-border) !important;
+  box-shadow: inset 6px 6px 13px rgba(0,0,0,.08), inset -6px -6px 13px rgba(255,255,255,.06) !important;
+  overflow: hidden !important;
+}
+
+.app-old-mirror .house-pot-progress span {
+  display: block !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  border-radius: inherit !important;
+  background: linear-gradient(90deg, #34d399, #4aa3ff, #6c63ff) !important;
+}
+
+.app-old-mirror .house-pot-body {
+  grid-template-columns: minmax(260px, .7fr) minmax(230px, .55fr) minmax(0, 1.25fr) !important;
+}
+
+.app-old-mirror .house-pot-summary {
+  min-height: 100% !important;
+}
+
+.app-old-mirror .house-pot-people,
+.app-old-mirror .house-pot-expenses {
+  min-width: 0 !important;
+}
+
+.app-old-mirror .house-pot-people h5,
+.app-old-mirror .house-pot-expenses h5 {
+  margin: 0 0 10px !important;
+  color: var(--f360-text-strong) !important;
+  font-size: .95rem !important;
+}
+
+.app-old-mirror .house-pot-person-row {
+  padding: 15px 16px !important;
+  margin-bottom: 10px !important;
+  border-radius: 20px !important;
+  background: var(--f360-surface) !important;
+  border: 1px solid var(--f360-border) !important;
+  box-shadow: var(--f360-outset-soft) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+}
+
+.app-old-mirror .house-pot-person-row span {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 3px !important;
+  min-width: 0 !important;
+}
+
+.app-old-mirror .house-pot-person-row b {
+  color: var(--f360-text-strong) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.app-old-mirror .house-pot-person-row em,
+.app-old-mirror .house-pot-pending span {
+  color: var(--f360-muted) !important;
+  font-size: .78rem !important;
+  font-style: normal !important;
+}
+
+.app-old-mirror .house-pot-person-row strong {
+  color: var(--f360-text-strong) !important;
+  white-space: nowrap !important;
+}
+
+.app-old-mirror .house-pot-pending {
+  margin-top: 16px !important;
+  padding-top: 14px !important;
+  border-top: 1px solid var(--f360-border) !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+  align-items: center !important;
+}
+
+.app-old-mirror .house-pot-pending b {
+  width: 100% !important;
+  color: var(--f360-text-strong) !important;
+}
+
+.app-old-mirror .house-pot-pending span {
+  padding: 6px 10px !important;
+  border-radius: 999px !important;
+  background: var(--f360-surface) !important;
+  border: 1px solid var(--f360-border) !important;
+}
+
+.app-old-mirror .house-pot-expenses .contribution-list {
+  grid-template-columns: repeat(2, minmax(180px, 1fr)) !important;
+}
+
+@media (max-width: 1240px) {
+  .app-old-mirror .house-pot-stats {
+    grid-template-columns: repeat(2, minmax(180px, 1fr)) !important;
+  }
+  .app-old-mirror .house-pot-body {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .app-old-mirror .house-pot-stats,
+  .app-old-mirror .house-pot-expenses .contribution-list {
+    grid-template-columns: 1fr !important;
+  }
+  .app-old-mirror .house-pot-stats > div {
+    min-height: 92px !important;
+  }
+  .app-old-mirror .house-pot-personal {
+    width: 100% !important;
+    justify-content: space-between !important;
+  }
+}
