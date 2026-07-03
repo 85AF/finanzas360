@@ -2353,7 +2353,14 @@ const F360V3 = (() => {
       { label: 'Personal', current: Math.max(0, currentMetrics.balance), prev: Math.max(0, prevMetrics.balance) }
     ];
     const max = Math.max(1, ...rows.flatMap(r => [r.current, r.prev]));
-    return `<div class="ytd-bars">${rows.map(r => `<div class="ytd-group"><div class="ytd-group-bars"><i class="prev" style="height:${(r.prev / max) * 100}%"></i><i class="current" style="height:${(r.current / max) * 100}%"></i></div><span>${escapeHtml(r.label)}</span></div>`).join("")}</div>`;
+    const bars = `<div class="ytd-bars" aria-hidden="true">${rows.map(r => `<div class="ytd-group"><div class="ytd-group-bars"><i class="prev" style="height:${(r.prev / max) * 100}%"></i><i class="current" style="height:${(r.current / max) * 100}%"></i></div><span>${escapeHtml(r.label)}</span></div>`).join("")}</div>`;
+    const list = `<div class="ytd-mobile-list" aria-label="Comparación anual compacta">${rows.map(r => {
+      const diff = r.current - r.prev;
+      const currentPct = Math.max(4, Math.min(100, (r.current / max) * 100));
+      const prevPct = Math.max(4, Math.min(100, (r.prev / max) * 100));
+      return `<div class="ytd-mobile-row"><div class="ytd-mobile-head"><strong>${escapeHtml(r.label)}</strong><em>${signedMoney(diff)}</em></div><div class="ytd-mobile-values"><span>Actual ${money(r.current)}</span><span>Anterior ${money(r.prev)}</span></div><div class="ytd-mobile-track"><i class="current" style="width:${currentPct}%"></i><i class="prev" style="width:${prevPct}%"></i></div></div>`;
+    }).join("")}</div>`;
+    return `${bars}${list}`;
   }
 
   function categoryCompareTable(currentCats, refCats) {

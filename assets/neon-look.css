@@ -9593,3 +9593,480 @@ body[data-f360-theme="dark"] .admin-create-user-card .setup-note {
     justify-content: center !important;
   }
 }
+
+/* ==========================================================
+   V22 · Revisión móvil/tablet completa
+   Objetivo UX: una sola columna clara, tarjetas compactas,
+   gráficas legibles y cero desbordes horizontales en teléfono.
+   Solo capa visual + apoyo para resumen anual compacto.
+========================================================== */
+html,
+body {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+}
+
+.app-old-mirror *,
+.app-old-mirror *::before,
+.app-old-mirror *::after {
+  box-sizing: border-box !important;
+}
+
+.ytd-mobile-list {
+  display: none !important;
+}
+
+@media (max-width: 1180px) {
+  .app.app-sidebar.app-old-mirror {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    overflow-x: hidden !important;
+  }
+
+  .app-old-mirror .content-area.old-content {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    padding: 14px !important;
+    overflow-x: hidden !important;
+  }
+
+  .app-old-mirror .old-side,
+  .app-old-mirror .side-nav.old-side {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow-x: hidden !important;
+  }
+
+  .app-old-mirror .section-card,
+  .app-old-mirror .card,
+  .app-old-mirror .metric,
+  .app-old-mirror .compact-card,
+  .app-old-mirror .chart-card-large,
+  .app-old-mirror .analytics-toolbar.old-analysis,
+  .app-old-mirror .house-pot-card,
+  .app-old-mirror .table-wrap,
+  .app-old-mirror .empty-state,
+  .app-old-mirror .reading-box {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .app-old-mirror .old-dashboard-grid,
+  .app-old-mirror .analytics-main-grid,
+  .app-old-mirror .analytics-compare-grid,
+  .app-old-mirror .ux-dashboard-main-grid,
+  .app-old-mirror .ux-executive-grid,
+  .app-old-mirror .ux-detail-grid,
+  .app-old-mirror .grid-2,
+  .app-old-mirror .grid-3,
+  .app-old-mirror .household-grid,
+  .app-old-mirror .register-single-grid,
+  .app-old-mirror .vehicles-grid,
+  .app-old-mirror .backup-grid,
+  .app-old-mirror .members-grid,
+  .app-old-mirror .categories-grid,
+  .app-old-mirror .goals-grid {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 16px !important;
+    align-items: start !important;
+  }
+
+  .app-old-mirror .period-grid.old-period-grid,
+  .app-old-mirror .analytics-controls.analytics-controls-pro,
+  .app-old-mirror .filters,
+  .app-old-mirror .inline-grid,
+  .app-old-mirror .form-grid,
+  .app-old-mirror .command-bar {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 12px !important;
+  }
+
+  .app-old-mirror .quick-actions {
+    grid-column: 1 / -1 !important;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+
+  .app-old-mirror .section-icon-row,
+  .app-old-mirror .section-header,
+  .app-old-mirror .analytics-toolbar-head,
+  .app-old-mirror .contribution-head,
+  .app-old-mirror .house-pot-head,
+  .app-old-mirror .old-title-row {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  .app-old-mirror .table-wrap {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .app-old-mirror table {
+    min-width: 760px !important;
+  }
+}
+
+@media (max-width: 760px) {
+  body::after {
+    display: none !important;
+  }
+
+  .app-old-mirror .content-area.old-content {
+    padding: 10px !important;
+  }
+
+  .app-old-mirror .section-card,
+  .app-old-mirror .card,
+  .app-old-mirror .metric,
+  .app-old-mirror .compact-card,
+  .app-old-mirror .chart-card-large,
+  .app-old-mirror .analytics-toolbar.old-analysis,
+  .app-old-mirror .house-pot-card {
+    padding: 16px !important;
+    border-radius: 24px !important;
+    box-shadow: 0 18px 42px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.08) !important;
+  }
+
+  .app-old-mirror .section-header,
+  .app-old-mirror .old-title-row {
+    margin: 18px 0 12px !important;
+  }
+
+  .app-old-mirror .section-icon-row {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 10px !important;
+  }
+
+  .app-old-mirror .section-badge,
+  .app-old-mirror .brand-logo {
+    width: 38px !important;
+    height: 38px !important;
+    min-width: 38px !important;
+  }
+
+  .app-old-mirror .old-title-row h3,
+  .app-old-mirror .section-header h3,
+  .app-old-mirror .page-head h2 {
+    font-size: clamp(1.35rem, 8vw, 2rem) !important;
+    line-height: .98 !important;
+    letter-spacing: -.055em !important;
+  }
+
+  .app-old-mirror .section-header p,
+  .app-old-mirror .old-title-row p,
+  .app-old-mirror .sub,
+  .app-old-mirror .hint,
+  .app-old-mirror .mini-note {
+    font-size: .84rem !important;
+    line-height: 1.42 !important;
+  }
+
+  .app-old-mirror .period-grid.old-period-grid,
+  .app-old-mirror .analytics-controls.analytics-controls-pro,
+  .app-old-mirror .filters,
+  .app-old-mirror .inline-grid,
+  .app-old-mirror .form-grid,
+  .app-old-mirror .command-bar,
+  .app-old-mirror .house-pot-stats,
+  .app-old-mirror .house-pot-body,
+  .app-old-mirror .house-pot-expenses .contribution-list,
+  .app-old-mirror .finance-coach-controls,
+  .app-old-mirror .finance-coach-summary,
+  .app-old-mirror .finance-coach-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 10px !important;
+  }
+
+  .app-old-mirror .quick-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .app-old-mirror .quick-actions .btn,
+  .app-old-mirror .btn,
+  .app-old-mirror button,
+  .app-old-mirror input,
+  .app-old-mirror select,
+  .app-old-mirror textarea {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  .app-old-mirror .quick-actions .btn {
+    min-height: 44px !important;
+    padding: 9px 8px !important;
+    font-size: .68rem !important;
+  }
+
+  .app-old-mirror .field label {
+    font-size: .72rem !important;
+  }
+
+  .app-old-mirror .field input,
+  .app-old-mirror .field select,
+  .app-old-mirror .field textarea {
+    min-height: 50px !important;
+    font-size: .92rem !important;
+  }
+
+  .app-old-mirror .metrics-grid,
+  .app-old-mirror .old-kpi-grid,
+  .app-old-mirror .household-summary-grid,
+  .app-old-mirror .vehicle-kpi-grid,
+  .app-old-mirror .coach-summary-grid,
+  .app-old-mirror .compare-kpi-grid,
+  .app-old-mirror .indicator-grid,
+  .app-old-mirror .ux-indicator-grid {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 10px !important;
+  }
+
+  .app-old-mirror .metric strong,
+  .app-old-mirror .old-kpi strong,
+  .app-old-mirror .household-kpi strong,
+  .app-old-mirror .compare-kpi strong {
+    font-size: clamp(1.35rem, 8vw, 2rem) !important;
+    line-height: 1.02 !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .app-old-mirror .house-pot-head,
+  .app-old-mirror .contribution-head {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 14px !important;
+  }
+
+  .app-old-mirror .house-pot-head h4,
+  .app-old-mirror .contribution-head h4 {
+    font-size: clamp(1.65rem, 9vw, 2.4rem) !important;
+    line-height: .98 !important;
+  }
+
+  .app-old-mirror .house-pot-big,
+  .app-old-mirror .contribution-big {
+    width: 100% !important;
+    min-height: 148px !important;
+    align-items: flex-start !important;
+    text-align: left !important;
+  }
+
+  .app-old-mirror .house-pot-big strong,
+  .app-old-mirror .contribution-big strong {
+    font-size: clamp(2.2rem, 15vw, 4rem) !important;
+    line-height: .9 !important;
+  }
+
+  .app-old-mirror .house-pot-personal {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    width: 100% !important;
+    gap: 6px 12px !important;
+  }
+
+  .app-old-mirror .house-pot-personal em {
+    grid-column: 1 / -1 !important;
+  }
+
+  .app-old-mirror .house-pot-person-row,
+  .app-old-mirror .contribution-row,
+  .app-old-mirror .compare-bar-row,
+  .app-old-mirror .progress-row,
+  .app-old-mirror .advice,
+  .app-old-mirror .guide-step-card {
+    padding: 13px 14px !important;
+    border-radius: 18px !important;
+  }
+
+  .app-old-mirror .donut-layout,
+  .app-old-mirror .dual-donut-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 14px !important;
+  }
+
+  .app-old-mirror .donut-ring,
+  .app-old-mirror .mini-donut-card .donut-ring {
+    width: min(220px, 72vw) !important;
+    margin: 0 auto !important;
+  }
+
+  .app-old-mirror .legend-item {
+    grid-template-columns: 12px minmax(0, 1fr) auto !important;
+    padding: 9px 10px !important;
+  }
+
+  /* Resumen anual: en teléfono la gráfica vertical se sustituye por filas compactas.
+     El dato se lee mejor y evita etiquetas encima de las barras. */
+  .app-old-mirror .ux-year-summary-card .ytd-bars,
+  .app-old-mirror .section-card:has(.ytd-bars) .ytd-bars {
+    display: none !important;
+  }
+
+  .app-old-mirror .ytd-mobile-list {
+    display: grid !important;
+    gap: 10px !important;
+    margin-top: 12px !important;
+  }
+
+  .app-old-mirror .ytd-mobile-row {
+    padding: 13px !important;
+    border-radius: 18px !important;
+    background: var(--f360-surface) !important;
+    border: 1px solid var(--f360-border) !important;
+    box-shadow: var(--f360-outset-soft) !important;
+    display: grid !important;
+    gap: 9px !important;
+  }
+
+  .app-old-mirror .ytd-mobile-head,
+  .app-old-mirror .ytd-mobile-values {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 10px !important;
+    min-width: 0 !important;
+  }
+
+  .app-old-mirror .ytd-mobile-head strong {
+    color: var(--f360-text-strong) !important;
+    font-size: .98rem !important;
+  }
+
+  .app-old-mirror .ytd-mobile-head em {
+    color: var(--f360-muted) !important;
+    font-size: .82rem !important;
+    font-style: normal !important;
+    text-align: right !important;
+    white-space: nowrap !important;
+  }
+
+  .app-old-mirror .ytd-mobile-values span {
+    color: var(--f360-muted) !important;
+    font-size: .75rem !important;
+    line-height: 1.2 !important;
+  }
+
+  .app-old-mirror .ytd-mobile-track {
+    position: relative !important;
+    height: 10px !important;
+    border-radius: 999px !important;
+    background: var(--f360-pressed) !important;
+    box-shadow: var(--f360-inset-soft) !important;
+    overflow: hidden !important;
+  }
+
+  .app-old-mirror .ytd-mobile-track i {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    border-radius: 999px !important;
+  }
+
+  .app-old-mirror .ytd-mobile-track i.prev {
+    background: color-mix(in srgb, var(--f360-blue) 58%, white) !important;
+    opacity: .45 !important;
+  }
+
+  .app-old-mirror .ytd-mobile-track i.current {
+    background: linear-gradient(90deg, #34d399, #4aa3ff) !important;
+    z-index: 2 !important;
+  }
+
+  .app-old-mirror .section-card:has(.ytd-bars) .reading-box,
+  .app-old-mirror .ux-year-summary-card .reading-box {
+    text-align: left !important;
+    margin-top: 12px !important;
+  }
+
+  .app-old-mirror .compare-bar-head,
+  .app-old-mirror .compare-bar-values {
+    align-items: flex-start !important;
+  }
+
+  .app-old-mirror .compare-bar-head span,
+  .app-old-mirror .compare-bar-values span {
+    font-size: .75rem !important;
+  }
+
+  .app-old-mirror .category-compare-table {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .app-old-mirror .cat-row {
+    min-width: 520px !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .app-old-mirror .content-area.old-content {
+    padding: 8px !important;
+  }
+
+  .app-old-mirror .section-card,
+  .app-old-mirror .card,
+  .app-old-mirror .metric,
+  .app-old-mirror .compact-card,
+  .app-old-mirror .chart-card-large,
+  .app-old-mirror .analytics-toolbar.old-analysis,
+  .app-old-mirror .house-pot-card {
+    padding: 14px !important;
+    border-radius: 22px !important;
+  }
+
+  .app-old-mirror .quick-actions {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .app-old-mirror .old-menu {
+    gap: 7px !important;
+  }
+
+  .app-old-mirror .old-menu button {
+    min-height: 46px !important;
+  }
+
+  .app-old-mirror .chart-card-large .chart-bars,
+  .app-old-mirror .analytics-main-grid .chart-card-large .chart-bars,
+  .app-old-mirror .section-card:has(.chart-bars) .chart-bars {
+    grid-template-columns: repeat(12, 30px) !important;
+    gap: 6px !important;
+  }
+
+  .app-old-mirror .chart-card-large .bar-stack i,
+  .app-old-mirror .analytics-main-grid .chart-card-large .bar-stack i,
+  .app-old-mirror .section-card:has(.chart-bars) .bar-stack i {
+    width: 5px !important;
+  }
+
+  .app-old-mirror .donut-ring,
+  .app-old-mirror .mini-donut-card .donut-ring {
+    width: min(190px, 70vw) !important;
+    padding: 13px !important;
+  }
+
+  .app-old-mirror .donut-hole strong {
+    font-size: 1.2rem !important;
+  }
+
+  .app-old-mirror table {
+    min-width: 680px !important;
+  }
+}
