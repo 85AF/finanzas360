@@ -31,7 +31,9 @@ const state = {
     category: "all",
     search: "",
     vehicle: "all",
-    year: String(new Date().getFullYear())
+    year: String(new Date().getFullYear()),
+    sortField: "date",
+    sortDirection: "desc"
   },
   analytics: {
     periodMonths: 12,
@@ -311,20 +313,25 @@ function vehicleRecordDescription(record) {
     .join(" · ");
 }
 
-function vehicleRecordAsMovement(record) {
+function vehicleRecordAsMovement(record, installment = null) {
   const responsibleId = vehicleRecordResponsibleId(record);
+  const installmentNumber = installment?.number || null;
+  const installmentCount = installment?.count || null;
+  const baseDescription = vehicleRecordDescription(record);
+  const installmentText = installmentNumber && installmentCount ? ` · cuota ${installmentNumber}/${installmentCount}` : "";
   return {
-    id: `vehicle:${record.id}`,
+    id: `vehicle:${record.id}${installmentNumber ? `:${installmentNumber}` : ""}`,
     _source: "vehicle",
     _vehicle_record_id: record.id,
+    _vehicle_id: record.vehicle_id,
     household_id: record.household_id,
     user_id: record.user_id || responsibleId,
     member_id: responsibleId,
     type: "expense",
     category_id: "__vehicle__",
-    amount: Number(record.amount || 0),
-    date: record.date || todayISO(),
-    description: vehicleRecordDescription(record),
+    amount: Number(installment?.amount ?? record.amount ?? 0),
+    date: installment?.date || record.date || todayISO(),
+    description: installment?.description || `${baseDescription}${installmentText}`,
     notes: record.note || "",
     kind: "vehicle",
     share_method: "none",
@@ -333,10 +340,64 @@ function vehicleRecordAsMovement(record) {
   };
 }
 
+function safeJsonArray(value) {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function insuranceInstallmentPlan(record) {
+  if (record?.type !== "insurance") return [];
+  const mode = String(record.payment_mode || "cash").toLowerCase();
+  if (!["financed", "monthly", "installments", "cuotas"].includes(mode)) return [];
+  const explicit = safeJsonArray(record.installments_json).filter(x => x && (x.date || x.amount));
+  if (explicit.length) {
+    return explicit.map((item, index) => ({
+      number: index + 1,
+      count: explicit.length,
+      date: dateOnly(item.date) || record.date || todayISO(),
+      amount: Number(item.amount || 0),
+      description: item.description || `${vehicleRecordDescription(record)} · cuota ${index + 1}/${explicit.length}`
+    })).filter(x => x.amount > 0);
+  }
+
+  const total = Number(record.amount || 0);
+  if (total <= 0) return [];
+  const start = dateOnly(record.date) || todayISO();
+  const startMonth = start.slice(0, 7);
+  const coverageEnd = dateOnly(record.coverage_end || "");
+  const monthsByCoverage = coverageEnd ? Math.max(1, monthIndexFromKey(coverageEnd.slice(0, 7)) - monthIndexFromKey(startMonth) + 1) : 0;
+  const count = Math.max(1, Math.min(60, Number(record.installment_count || 0) || monthsByCoverage || (mode === "monthly" ? 12 : 1)));
+  if (count <= 1) return [];
+  const installmentAmount = Number(record.installment_amount || 0) > 0 ? Number(record.installment_amount) : total / count;
+  const day = Number(record.installment_day || String(start).slice(8, 10) || 1);
+  return Array.from({ length: count }, (_, index) => {
+    const key = addMonthsKey(startMonth, index);
+    const date = `${key}-${clampDayForMonth(key, day)}`;
+    return {
+      number: index + 1,
+      count,
+      date,
+      amount: Number(installmentAmount.toFixed(2)),
+      description: `${vehicleRecordDescription(record)} · cuota ${index + 1}/${count}`
+    };
+  });
+}
+
+function vehicleRecordMovementInstances(record) {
+  const installments = insuranceInstallmentPlan(record);
+  return installments.length ? installments.map(item => vehicleRecordAsMovement(record, item)) : [vehicleRecordAsMovement(record)];
+}
+
 function vehicleRecordsAsMovements() {
   return state.vehicleRecords
     .filter(record => String(record.status || "").toLowerCase() !== "cancelado")
-    .map(vehicleRecordAsMovement);
+    .flatMap(vehicleRecordMovementInstances);
 }
 
 function monthIndexFromKey(key) {
@@ -502,13 +563,34 @@ function getVisibleMovements(base = state.movements) {
   return items.filter(x => x.user_id === state.user.id || x.member_id === state.user.id || x.is_shared);
 }
 
+function movementSortValue(movement, field = state.filters.sortField) {
+  if (field === "amount") return Number(movement.amount || 0);
+  if (field === "type") return movement.type === "income" ? 1 : 0;
+  if (field === "category") return categoryName(movement.category_id).toLowerCase();
+  if (field === "member") return memberName(movement.member_id || movement.user_id).toLowerCase();
+  if (field === "concept") return String(movement.description || movement.notes || "").toLowerCase();
+  return dateOnly(movement.date || movement.created_at || "");
+}
+
+function sortMovementItems(items = []) {
+  const field = state.filters.sortField || "date";
+  const direction = state.filters.sortDirection === "asc" ? 1 : -1;
+  return [...items].sort((a, b) => {
+    const av = movementSortValue(a, field);
+    const bv = movementSortValue(b, field);
+    if (typeof av === "number" || typeof bv === "number") return ((Number(av) || 0) - (Number(bv) || 0)) * direction;
+    const result = String(av).localeCompare(String(bv), "es", { numeric: true, sensitivity: "base" });
+    return result * direction;
+  });
+}
+
 function getMovementsFiltered() {
   let items = getVisibleMovements();
   if (state.filters.month) items = items.filter(x => isSameMonth(x.date));
   if (state.filters.movementType !== "all") items = items.filter(x => x.type === state.filters.movementType);
   if (state.filters.category && state.filters.category !== "all") items = items.filter(x => x.category_id === state.filters.category);
   if (state.filters.search) items = items.filter(x => movementMatchesText(x, state.filters.search));
-  return applyPersonFilterWithSharedAllocation(items, state.filters.person);
+  return sortMovementItems(applyPersonFilterWithSharedAllocation(items, state.filters.person));
 }
 
 function metricsFor(items) {
@@ -1019,7 +1101,7 @@ function renderMovementTable(items, actions = true) {
         const actionCell = !actions ? "" : isVehicle
           ? `<td><div class="td-actions"><button class="btn small" data-edit-vehicle-record="${x._vehicle_record_id}">Editar</button><button class="btn small" data-section="vehicles">Ver vehículo</button><button class="btn small danger" data-delete-vehicle-record="${x._vehicle_record_id}">Borrar</button></div></td>`
           : isRecurring
-            ? `<td><div class="td-actions"><button class="btn small" data-section="register">Ver automático</button><button class="btn small danger" data-delete-recurring="${x._recurring_id}">Borrar automático</button></div></td>`
+            ? `<td><div class="td-actions"><button class="btn small" data-edit-recurring="${x._recurring_id}">Editar plan</button><button class="btn small" data-section="register">Ver automático</button><button class="btn small danger" data-delete-recurring="${x._recurring_id}">Borrar automático</button></div></td>`
             : `<td><div class="td-actions"><button class="btn small" data-edit-movement="${x.id}">Editar</button><button class="btn small danger" data-delete-movement="${x.id}">Borrar</button></div></td>`;
         return `<tr><td>${escapeHtml(dateOnly(x.date))}</td><td><span class="tag ${typeClass}">${typeLabel}</span>${x.is_shared ? ` <span class="tag neutral">Común</span>` : ""}${isRecurring ? ` <span class="tag neutral">Auto</span>` : ""}</td><td>${escapeHtml(x.description || "Sin descripción")}</td><td>${escapeHtml(categoryName(x.category_id))}</td><td>${escapeHtml(memberName(x.member_id || x.user_id))}</td><td><strong>${money(x.amount)}</strong></td>${actionCell}</tr>`;
       }).join("")}
@@ -1121,7 +1203,7 @@ function vehicleRecordTypeLabel(type) {
   return { insurance: "Seguro", maintenance: "Mantenimiento", oil: "Aceite", tires: "Neumáticos", itv: "ITV", repair: "Reparación", fuel: "Combustible", tax: "Impuesto", other: "Otro" }[type] || type;
 }
 function vehicleTotalSpent(vehicleId = null, year = activeYear()) {
-  return sum(state.vehicleRecords.filter(r => (!vehicleId || r.vehicle_id === vehicleId) && isSameYear(r.date, year) && r.status !== "cancelado"), r => r.amount);
+  return sum(vehicleRecordsAsMovements().filter(m => (!vehicleId || m._vehicle_id === vehicleId) && isSameYear(m.date, year)), m => m.amount);
 }
 function vehicleRecordsFor(vehicleId) {
   return state.vehicleRecords.filter(r => r.vehicle_id === vehicleId).sort((a, b) => String(b.date).localeCompare(String(a.date)));
@@ -1211,6 +1293,8 @@ function renderInsuranceForm() {
     <div class="inline-grid"><div class="field"><label>Forma de pago</label><select name="payment_mode"><option value="cash">Al contado</option><option value="financed">Financiado / cuotas</option><option value="monthly">Mensual</option></select></div><div class="field"><label>Estado</label><select name="status"><option value="activo">Activo</option><option value="pendiente">Pendiente</option><option value="finalizado">Finalizado</option><option value="cancelado">Cancelado</option></select></div></div>
     <div class="inline-grid"><div class="field"><label>Inicio / primer pago</label><input name="date" type="date" value="${todayISO()}" /></div><div class="field"><label>Fin de cobertura</label><input name="coverage_end" type="date" /></div></div>
     <div class="inline-grid"><div class="field"><label>Día de pago de cuota</label><input name="installment_day" type="number" min="1" max="31" value="1" /></div><div class="field"><label>Responsable del pago</label><select name="responsible_user_id">${memberOptions(state.user.id)}</select></div></div>
+    <div class="inline-grid"><div class="field"><label>Nº de cuotas</label><input name="installment_count" type="number" min="1" max="60" placeholder="Ej. 12" /></div><div class="field"><label>Importe por cuota</label><input name="installment_amount" type="number" step="0.01" min="0" placeholder="Se calcula si lo dejas vacío" /></div></div>
+    <p class="hint">Si el seguro está financiado, Inicio y Movimientos mostrarán cada cuota en su mes, no todo el total en un solo golpe.</p>
     <div class="field"><label>Notas</label><textarea name="note" placeholder="Nº de póliza, franquicia, teléfono, observaciones..."></textarea></div>
     <div class="form-actions"><button class="btn primary" id="saveInsuranceBtn" type="submit">Guardar seguro</button><button class="btn ghost" type="button" id="cancelInsuranceEdit" hidden>Cancelar edición</button></div>
   </form>`;
@@ -1232,7 +1316,7 @@ function renderVehicleRecordForm() {
 
 function renderVehicleRecordsTable(records) {
   if (!records.length) return `<div class="empty-state"><strong>Sin historial</strong>Los seguros, mantenimientos y gastos aparecerán aquí.</div>`;
-  return `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Vehículo</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Próximo aviso</th><th>Acciones</th></tr></thead><tbody>${records.map(r => { const v = state.vehicles.find(x => x.id === r.vehicle_id); return `<tr><td>${escapeHtml(dateOnly(r.date))}</td><td>${escapeHtml(v?.name || "Vehículo")}</td><td>${escapeHtml(vehicleRecordTypeLabel(r.type))}</td><td>${escapeHtml(r.concept || r.insurance_company || r.note || "Registro")}</td><td><strong>${money(r.amount)}</strong></td><td>${escapeHtml(dateOnly(r.next_date || r.coverage_end) || "-")}</td><td><div class="td-actions"><button class="btn small" data-edit-vehicle-record="${r.id}">Editar</button><button class="btn small danger" data-delete-vehicle-record="${r.id}">Borrar</button></div></td></tr>`; }).join("")}</tbody></table></div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Vehículo</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Próximo aviso</th><th>Acciones</th></tr></thead><tbody>${records.map(r => { const v = state.vehicles.find(x => x.id === r.vehicle_id); return `<tr><td>${escapeHtml(dateOnly(r.date))}</td><td>${escapeHtml(v?.name || "Vehículo")}</td><td>${escapeHtml(vehicleRecordTypeLabel(r.type))}</td><td>${escapeHtml(r.concept || r.insurance_company || r.note || "Registro")}${r.type === "insurance" && Number(r.installment_count || 0) > 1 ? `<br><span class="muted">${Number(r.installment_count)} cuotas${Number(r.installment_amount || 0) > 0 ? ` de ${money(r.installment_amount)}` : ""}</span>` : ""}</td><td><strong>${money(r.amount)}</strong></td><td>${escapeHtml(dateOnly(r.next_date || r.coverage_end) || "-")}</td><td><div class="td-actions"><button class="btn small" data-edit-vehicle-record="${r.id}">Editar</button><button class="btn small danger" data-delete-vehicle-record="${r.id}">Borrar</button></div></td></tr>`; }).join("")}</tbody></table></div>`;
 }
 
 function renderReports() {
@@ -1357,6 +1441,8 @@ function bindCommonActions() {
   $("#filterType")?.addEventListener("change", e => { state.filters.movementType = e.target.value; renderApp(); });
   $("#filterCategory")?.addEventListener("change", e => { state.filters.category = e.target.value || "all"; renderApp(); });
   $("#filterSearch")?.addEventListener("input", e => { state.filters.search = e.target.value || ""; renderApp(); });
+  $("#filterSortField")?.addEventListener("change", e => { state.filters.sortField = e.target.value || "date"; renderApp(); });
+  $("#filterSortDirection")?.addEventListener("change", e => { state.filters.sortDirection = e.target.value || "desc"; renderApp(); });
   $("#analyticsPeriod")?.addEventListener("change", e => { state.analytics.periodMonths = Number(e.target.value || 12); renderApp(); });
   $("#analyticsCompare")?.addEventListener("change", e => { state.analytics.compare = e.target.value || 'prevMonth'; renderApp(); });
   $("#analyticsCategory")?.addEventListener("change", e => { state.analytics.category = e.target.value || 'all'; renderApp(); });
@@ -1462,7 +1548,7 @@ async function handleVehicleInsuranceSubmit(event) {
   if (!can("vehicles", "create") && !can("vehicles", "edit")) return showToast("No tienes permiso para guardar seguros.", "danger");
   const f = new FormData(event.currentTarget);
   const id = String(f.get("id") || "").trim();
-  const payload = { household_id: state.currentHouseholdId, vehicle_id: f.get("vehicle_id"), user_id: state.user.id, type: "insurance", amount: parseAmount(f.get("amount")), date: f.get("date") || todayISO(), note: String(f.get("note") || "").trim(), concept: "Seguro anual", insurance_company: String(f.get("insurance_company") || "").trim(), payment_mode: f.get("payment_mode"), status: f.get("status") || "activo", coverage_end: f.get("coverage_end") || null, installment_day: f.get("installment_day") ? Number(f.get("installment_day")) : null, responsible_user_id: f.get("responsible_user_id") || state.user.id };
+  const payload = { household_id: state.currentHouseholdId, vehicle_id: f.get("vehicle_id"), user_id: state.user.id, type: "insurance", amount: parseAmount(f.get("amount")), date: f.get("date") || todayISO(), note: String(f.get("note") || "").trim(), concept: "Seguro anual", insurance_company: String(f.get("insurance_company") || "").trim(), payment_mode: f.get("payment_mode"), status: f.get("status") || "activo", coverage_end: f.get("coverage_end") || null, installment_day: f.get("installment_day") ? Number(f.get("installment_day")) : null, installment_count: f.get("installment_count") ? Number(f.get("installment_count")) : null, installment_amount: f.get("installment_amount") ? parseAmount(f.get("installment_amount")) : null, responsible_user_id: f.get("responsible_user_id") || state.user.id };
   if (id) {
     await updateWithSchemaFallback("vehicle_records", payload, { id, household_id: state.currentHouseholdId }, "Seguro actualizado.", ["household_id","vehicle_id","user_id","type","amount","date","note"]);
   } else {
@@ -1553,6 +1639,8 @@ function resetInsuranceFormEdit() {
   setFormField(form, "id", "");
   setFormField(form, "date", todayISO());
   setFormField(form, "installment_day", 1);
+  setFormField(form, "installment_count", "");
+  setFormField(form, "installment_amount", "");
   document.getElementById("saveInsuranceBtn").textContent = "Guardar seguro";
   const cancel = document.getElementById("cancelInsuranceEdit");
   if (cancel) cancel.hidden = true;
@@ -1593,6 +1681,8 @@ function editVehicleRecord(id) {
     setFormField(form, "date", dateOnly(record.date) || todayISO());
     setFormField(form, "coverage_end", dateOnly(record.coverage_end) || "");
     setFormField(form, "installment_day", record.installment_day ?? 1);
+    setFormField(form, "installment_count", record.installment_count ?? "");
+    setFormField(form, "installment_amount", record.installment_amount ?? "");
     setSelectField(form, "responsible_user_id", record.responsible_user_id || record.user_id || state.user?.id || "");
     setFormField(form, "note", record.note || "");
     document.getElementById("saveInsuranceBtn").textContent = "Actualizar seguro";
@@ -1997,9 +2087,9 @@ const F360V3 = (() => {
       <div class="help-banner"><span class="hb-icon">ℹ️</span><div><strong>La lógica queda separada por dentro, pero ordenada por fuera.</strong> Usa movimientos puntuales para pagos únicos y recurrentes para nóminas, servicios variables, deudas o cuotas.</div></div>
       <article class="section-card register-flow-card"><h4>¿Qué quieres registrar?</h4><div class="register-choice-grid" id="registerFlowChoices"><button class="register-choice-btn active" data-flow-target="incomePanel" type="button"><b>➕ Ingreso puntual</b><span>Nómina cobrada una vez, factura, venta, freelance o dinero que entra este mes.</span></button><button class="register-choice-btn" data-flow-target="expensePanel" type="button"><b>➖ Gasto puntual</b><span>Compra, factura pagada, comida, transporte o gasto único del mes.</span></button><button class="register-choice-btn" data-flow-target="recurringPanel" type="button"><b>↻ Recurrente, deuda o servicio variable</b><span>Pagos que se repiten, cambian de importe o necesitan planificación.</span></button></div><div class="register-flow-hint">Tip: los gastos comunes deben marcarse como compartidos para que aparezcan en Aportes y Casa común.</div></article>
       <section class="register-single-grid">
-        <article class="section-card register-panel" id="incomePanel"><h4>Nuevo ingreso puntual</h4><form id="incomeForm"><div class="inline-grid"><div class="field"><label>Concepto</label><input name="concept" required placeholder="Ej. Nómina DirectMarkt" /></div><div class="field"><label>Monto</label><input name="amount" type="number" step="0.01" min="0" required placeholder="0,00" /></div></div><div class="inline-grid"><div class="field"><label>Fecha</label><input name="date" type="date" value="${todayISO()}" /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions("income")}</select></div></div><div class="field"><label>Miembro</label><select name="member_id">${memberOptions(state.user.id)}</select></div><div class="field"><label>Notas</label><textarea name="notes" placeholder="Opcional"></textarea></div><button class="btn primary" type="submit">Guardar ingreso</button></form></article>
-        <article class="section-card register-panel" id="expensePanel"><h4>Nuevo gasto puntual</h4><form id="expenseForm"><div class="inline-grid"><div class="field"><label>Concepto</label><input name="concept" required placeholder="Ej. Compra, gas, comida, gasolina" /></div><div class="field"><label>Monto total</label><input name="amount" type="number" step="0.01" min="0" required placeholder="0,00" /></div></div><div class="inline-grid"><div class="field"><label>Fecha</label><input name="date" type="date" value="${todayISO()}" /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions("expense")}</select></div></div><div class="inline-grid"><div class="field"><label>Responsable</label><select name="member_id">${memberOptions(state.user.id)}</select></div><div class="field"><label>Tipo de gasto</label><select name="kind"><option value="personal">Personal</option><option value="shared">Compartido / casa</option><option value="debt">Deuda</option><option value="vehicle">Vehículo</option></select></div></div><label class="switch-row"><span><strong>¿Gasto compartido?</strong><br><span class="hint">Alquiler, comida de casa, luz, agua, gas, internet...</span></span><input name="is_shared" type="checkbox" /></label><div class="field"><label>Método de reparto</label><select name="share_method"><option value="equal">Partes iguales</option><option value="income">Según ingresos</option><option value="manual">Manual</option></select></div><div class="field"><label>Notas</label><textarea name="notes" placeholder="Opcional"></textarea></div><button class="btn primary" type="submit">Guardar gasto</button></form></article>
-        <article class="section-card register-panel" id="recurringPanel"><h3>Recurrentes, deudas y servicios variables</h3><form id="recurringForm"><h4>Nuevo recurrente o servicio variable</h4><div class="inline-grid"><div class="field"><label>Concepto</label><input name="description" required placeholder="Ej. Nómina, luz, agua, gas, crédito coche, comida de Papito" /></div><div class="field"><label>Importe mensual / estimado</label><input name="amount" type="number" step="0.01" min="0" required placeholder="0,00" /></div></div><div class="inline-grid"><div class="field"><label>Empieza en</label><input name="start_date" type="date" value="${todayISO()}" /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions()}</select></div></div><div class="inline-grid"><div class="field"><label>Persona</label><select name="member_id">${memberOptions(state.user.id)}</select></div><div class="field"><label>Tipo de automático</label><select name="type"><option value="expense">Gasto</option><option value="income">Ingreso</option></select></div></div><div class="inline-grid"><div class="field"><label>Día de cargo</label><input name="day_of_month" type="number" min="1" max="31" value="1" /></div><div class="field"><label>Frecuencia</label><select name="frequency"><option value="monthly">Mensual</option><option value="bimonthly">Bimensual</option><option value="yearly">Anual</option></select></div></div><div class="inline-grid"><div class="field"><label>Tipo de importe</label><select name="amount_mode"><option value="fixed">Fijo</option><option value="variable">Variable</option></select></div><div class="field"><label>¿Hasta cuándo se repite?</label><select name="end_mode"><option value="indefinite">Indefinido</option><option value="months">Por meses</option><option value="years">Por años</option><option value="date">Hasta fecha</option></select></div></div><div class="inline-grid"><div class="field"><label>Nº de meses</label><input name="fixed_months" type="number" min="1" placeholder="Si elegiste por meses" /></div><div class="field"><label>Nº de años / fecha fin</label><div class="inline-grid compact-inner"><input name="fixed_years" type="number" min="1" placeholder="Años" /><input name="end_date" type="date" /></div></div></div><h4>Datos de deuda o préstamo</h4><div class="inline-grid"><div class="field"><label>Importe total original</label><input name="debt_original_amount" type="number" step="0.01" placeholder="Ej. 11000" /></div><div class="field"><label>Entidad / referencia</label><input name="debt_lender" placeholder="Ej. Sofinco, Campus Training" /></div></div><label class="switch-row"><span><strong>¿Automático compartido?</strong><br><span class="hint">Útil para alquiler, luz, agua, gas, internet o comida de casa.</span></span><input name="is_shared" type="checkbox" /></label><label class="switch-row"><span><strong>Activo</strong><br><span class="hint">Desactívalo cuando ya no aplique.</span></span><input name="active" type="checkbox" checked /></label><div class="field"><label>Notas</label><textarea name="notes" placeholder="Cuota coche, agua bimensual, comida mensual del perro..."></textarea></div><button class="btn primary" type="submit">Guardar automático</button></form></article>
+        <article class="section-card register-panel" id="incomePanel"><h4 id="incomeFormTitle">Nuevo ingreso puntual</h4><form id="incomeForm"><input name="id" type="hidden" /><div class="inline-grid"><div class="field"><label>Concepto</label><input name="concept" required placeholder="Ej. Nómina DirectMarkt" /></div><div class="field"><label>Monto</label><input name="amount" type="number" step="0.01" min="0" required placeholder="0,00" /></div></div><div class="inline-grid"><div class="field"><label>Fecha</label><input name="date" type="date" value="${todayISO()}" /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions("income")}</select></div></div><div class="field"><label>Miembro</label><select name="member_id">${memberOptions(state.user.id)}</select></div><div class="field"><label>Notas</label><textarea name="notes" placeholder="Opcional"></textarea></div><div class="form-actions"><button class="btn primary" id="saveIncomeBtn" type="submit">Guardar ingreso</button><button class="btn ghost" type="button" id="cancelIncomeEdit" hidden>Cancelar edición</button></div></form></article>
+        <article class="section-card register-panel" id="expensePanel"><h4 id="expenseFormTitle">Nuevo gasto puntual</h4><form id="expenseForm"><input name="id" type="hidden" /><div class="inline-grid"><div class="field"><label>Concepto</label><input name="concept" required placeholder="Ej. Compra, gas, comida, gasolina" /></div><div class="field"><label>Monto total</label><input name="amount" type="number" step="0.01" min="0" required placeholder="0,00" /></div></div><div class="inline-grid"><div class="field"><label>Fecha</label><input name="date" type="date" value="${todayISO()}" /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions("expense")}</select></div></div><div class="inline-grid"><div class="field"><label>Responsable</label><select name="member_id">${memberOptions(state.user.id)}</select></div><div class="field"><label>Tipo de gasto</label><select name="kind"><option value="personal">Personal</option><option value="shared">Compartido / casa</option><option value="debt">Deuda</option><option value="vehicle">Vehículo</option></select></div></div><label class="switch-row"><span><strong>¿Gasto compartido?</strong><br><span class="hint">Alquiler, comida de casa, luz, agua, gas, internet...</span></span><input name="is_shared" type="checkbox" /></label><div class="field"><label>Método de reparto</label><select name="share_method"><option value="equal">Partes iguales</option><option value="income">Según ingresos</option><option value="manual">Manual</option></select></div><div class="field"><label>Notas</label><textarea name="notes" placeholder="Opcional"></textarea></div><div class="form-actions"><button class="btn primary" id="saveExpenseBtn" type="submit">Guardar gasto</button><button class="btn ghost" type="button" id="cancelExpenseEdit" hidden>Cancelar edición</button></div></form></article>
+        <article class="section-card register-panel" id="recurringPanel"><h3>Recurrentes, deudas y servicios variables</h3><form id="recurringForm"><input name="id" type="hidden" /><h4 id="recurringFormTitle">Nuevo recurrente o servicio variable</h4><div class="inline-grid"><div class="field"><label>Concepto</label><input name="description" required placeholder="Ej. Nómina, luz, agua, gas, crédito coche, comida de Papito" /></div><div class="field"><label>Importe mensual / estimado</label><input name="amount" type="number" step="0.01" min="0" required placeholder="0,00" /></div></div><div class="inline-grid"><div class="field"><label>Empieza en</label><input name="start_date" type="date" value="${todayISO()}" /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions()}</select></div></div><div class="inline-grid"><div class="field"><label>Persona</label><select name="member_id">${memberOptions(state.user.id)}</select></div><div class="field"><label>Tipo de automático</label><select name="type"><option value="expense">Gasto</option><option value="income">Ingreso</option></select></div></div><div class="inline-grid"><div class="field"><label>Día de cargo</label><input name="day_of_month" type="number" min="1" max="31" value="1" /></div><div class="field"><label>Frecuencia</label><select name="frequency"><option value="monthly">Mensual</option><option value="bimonthly">Bimensual</option><option value="yearly">Anual</option></select></div></div><div class="inline-grid"><div class="field"><label>Tipo de importe</label><select name="amount_mode"><option value="fixed">Fijo</option><option value="variable">Variable</option></select></div><div class="field"><label>¿Hasta cuándo se repite?</label><select name="end_mode"><option value="indefinite">Indefinido</option><option value="months">Por meses</option><option value="years">Por años</option><option value="date">Hasta fecha</option></select></div></div><div class="inline-grid"><div class="field"><label>Nº de meses</label><input name="fixed_months" type="number" min="1" placeholder="Si elegiste por meses" /></div><div class="field"><label>Nº de años / fecha fin</label><div class="inline-grid compact-inner"><input name="fixed_years" type="number" min="1" placeholder="Años" /><input name="end_date" type="date" /></div></div></div><h4>Datos de deuda o préstamo</h4><div class="inline-grid"><div class="field"><label>Importe total original</label><input name="debt_original_amount" type="number" step="0.01" placeholder="Ej. 11000" /></div><div class="field"><label>Entidad / referencia</label><input name="debt_lender" placeholder="Ej. Sofinco, Campus Training" /></div></div><label class="switch-row"><span><strong>¿Automático compartido?</strong><br><span class="hint">Útil para alquiler, luz, agua, gas, internet o comida de casa.</span></span><input name="is_shared" type="checkbox" /></label><label class="switch-row"><span><strong>Activo</strong><br><span class="hint">Desactívalo cuando ya no aplique.</span></span><input name="active" type="checkbox" checked /></label><div class="field"><label>Notas</label><textarea name="notes" placeholder="Cuota coche, agua bimensual, comida mensual del perro..."></textarea></div><div class="form-actions"><button class="btn primary" id="saveRecurringBtn" type="submit">Guardar automático</button><button class="btn ghost" type="button" id="cancelRecurringEdit" hidden>Cancelar edición</button></div></form></article>
       </section>`;
   }
 
@@ -2008,11 +2098,12 @@ const F360V3 = (() => {
     const extra = `<div class="field"><label>Tipo</label><select id="filterType"><option value="all" ${state.filters.movementType === "all" ? "selected" : ""}>Todos</option><option value="income" ${state.filters.movementType === "income" ? "selected" : ""}>Ingresos</option><option value="expense" ${state.filters.movementType === "expense" ? "selected" : ""}>Gastos</option></select></div>`;
     const categoryFilter = `<div class="field"><label>Categoría</label><select id="filterCategory"><option value="all" ${state.filters.category === "all" ? "selected" : ""}>Todas</option>${state.categories.map(c=>`<option value="${c.id}" ${state.filters.category === c.id ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}</select></div>`;
     const searchFilter = `<div class="field"><label>Buscar</label><input id="filterSearch" value="${escapeHtml(state.filters.search || "")}" placeholder="Concepto, nota, categoría o persona" /></div>`;
-    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">📋</div><div><h3>Movimientos del mes</h3><p>Consulta, filtra, edita y elimina según tus permisos.</p></div></div></section><article class="section-card">${periodToolbar()}<div class="filters">${categoryFilter}${extra}${searchFilter}</div>${renderMovementTable(items, true)}</article>`;
+    const sortFilter = `<div class="field"><label>Ordenar por</label><select id="filterSortField"><option value="date" ${state.filters.sortField === "date" ? "selected" : ""}>Fecha</option><option value="amount" ${state.filters.sortField === "amount" ? "selected" : ""}>Importe</option><option value="concept" ${state.filters.sortField === "concept" ? "selected" : ""}>Concepto</option><option value="category" ${state.filters.sortField === "category" ? "selected" : ""}>Categoría</option><option value="member" ${state.filters.sortField === "member" ? "selected" : ""}>Persona</option><option value="type" ${state.filters.sortField === "type" ? "selected" : ""}>Tipo</option></select></div><div class="field"><label>Dirección</label><select id="filterSortDirection"><option value="desc" ${state.filters.sortDirection !== "asc" ? "selected" : ""}>Descendente</option><option value="asc" ${state.filters.sortDirection === "asc" ? "selected" : ""}>Ascendente</option></select></div>`;
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">📋</div><div><h3>Movimientos del mes</h3><p>Consulta, filtra, edita y elimina según tus permisos.</p></div></div></section><article class="section-card">${periodToolbar()}<div class="filters">${categoryFilter}${extra}${searchFilter}${sortFilter}</div>${renderMovementTable(items, true)}</article>`;
   }
 
   function renderRecurring() {
-    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🔁</div><div><h3>Recurrentes configurados</h3><p>Pagos, ingresos, deudas y servicios variables que se repiten.</p></div></div></section><article class="section-card"><h4>Automáticos y servicios configurados</h4>${state.recurring.length ? `<div class="table-wrap"><table><thead><tr><th>Concepto</th><th>Tipo</th><th>Importe</th><th>Día</th><th>Frecuencia</th><th>Persona</th><th>Compartido</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${state.recurring.map(r=>`<tr><td>${escapeHtml(r.description)}</td><td>${r.type==='income'?'Ingreso':'Gasto'}</td><td><strong>${money(r.amount)}</strong></td><td>${escapeHtml(r.day_of_month || '-')}</td><td>${escapeHtml(r.frequency || 'monthly')}</td><td>${escapeHtml(memberName(r.member_id || r.user_id))}</td><td>${r.is_shared?'Sí':'No'}</td><td>${r.active!==false?'Activo':'Inactivo'}</td><td><button class="btn small danger" data-delete-recurring="${r.id}">Borrar</button></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>Sin recurrentes todavía</strong>Créalo desde Registrar.</div>`}</article>`;
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🔁</div><div><h3>Recurrentes configurados</h3><p>Pagos, ingresos, deudas y servicios variables que se repiten.</p></div></div></section><article class="section-card"><h4>Automáticos y servicios configurados</h4>${state.recurring.length ? `<div class="table-wrap"><table><thead><tr><th>Concepto</th><th>Tipo</th><th>Importe</th><th>Día</th><th>Frecuencia</th><th>Persona</th><th>Compartido</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${state.recurring.map(r=>`<tr><td>${escapeHtml(r.description)}</td><td>${r.type==='income'?'Ingreso':'Gasto'}</td><td><strong>${money(r.amount)}</strong></td><td>${escapeHtml(r.day_of_month || '-')}</td><td>${escapeHtml(r.frequency || 'monthly')}</td><td>${escapeHtml(memberName(r.member_id || r.user_id))}</td><td>${r.is_shared?'Sí':'No'}</td><td>${r.active!==false?'Activo':'Inactivo'}</td><td><div class="td-actions"><button class="btn small" data-edit-recurring="${r.id}">Editar</button><button class="btn small warn" data-toggle-recurring="${r.id}">${r.active!==false?'Pausar':'Activar'}</button><button class="btn small danger" data-delete-recurring="${r.id}">Borrar</button></div></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>Sin recurrentes todavía</strong>Créalo desde Registrar.</div>`}</article>`;
   }
 
   function renderHousehold() {
@@ -2071,11 +2162,11 @@ const F360V3 = (() => {
   }
 
   function renderCategories() {
-    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🏷️</div><div><h3>Categorías y presupuestos</h3><p>Organiza ingresos y gastos con presupuesto mensual para detectar excesos.</p></div></div></section><section class="categories-grid"><article class="section-card"><h4>Nueva categoría</h4><form id="categoryForm"><input name="id" type="hidden" /><div class="field"><label>Nombre</label><input name="name" required placeholder="Ej. Mascotas" /></div><div class="inline-grid"><div class="field"><label>Tipo</label><select name="type"><option value="expense">Gasto</option><option value="income">Ingreso</option><option value="both">Ambos</option></select></div><div class="field"><label>Presupuesto mensual</label><input name="budget" type="number" step="0.01" placeholder="Solo gastos" /></div></div><div class="field"><label>Color</label><input name="color" type="color" value="#4aa8ff" /></div><button class="btn primary" type="submit">Guardar categoría</button></form></article><article class="section-card"><h4>Listado de categorías</h4>${state.categories.length ? `<div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Tipo</th><th>Presupuesto</th><th>Color</th><th>Acciones</th></tr></thead><tbody>${state.categories.map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.type)}</td><td>${money(c.budget || 0)}</td><td><span class="tag" style="background:${escapeHtml(c.color || '#4aa8ff')};color:white">${escapeHtml(c.color || '')}</span></td><td><button class="btn small danger" data-delete-category="${c.id}">Borrar</button></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>Sin categorías</strong>Crea tus primeras categorías.</div>`}</article></section>`;
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🏷️</div><div><h3>Categorías y presupuestos</h3><p>Organiza ingresos y gastos con presupuesto mensual para detectar excesos.</p></div></div></section><section class="categories-grid"><article class="section-card"><h4 id="categoryFormTitle">Nueva categoría</h4><form id="categoryForm"><input name="id" type="hidden" /><div class="field"><label>Nombre</label><input name="name" required placeholder="Ej. Mascotas" /></div><div class="inline-grid"><div class="field"><label>Tipo</label><select name="type"><option value="expense">Gasto</option><option value="income">Ingreso</option><option value="both">Ambos</option></select></div><div class="field"><label>Presupuesto mensual</label><input name="budget" type="number" step="0.01" placeholder="Solo gastos" /></div></div><div class="field"><label>Color</label><input name="color" type="color" value="#4aa8ff" /></div><div class="form-actions"><button class="btn primary" id="saveCategoryBtn" type="submit">Guardar categoría</button><button class="btn ghost" type="button" id="cancelCategoryEdit" hidden>Cancelar edición</button></div></form></article><article class="section-card"><h4>Listado de categorías</h4>${state.categories.length ? `<div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Tipo</th><th>Presupuesto</th><th>Color</th><th>Acciones</th></tr></thead><tbody>${state.categories.map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.type)}</td><td>${money(c.budget || 0)}</td><td><span class="tag" style="background:${escapeHtml(c.color || '#4aa8ff')};color:white">${escapeHtml(c.color || '')}</span></td><td><div class="td-actions"><button class="btn small" data-edit-category="${c.id}">Editar</button><button class="btn small danger" data-delete-category="${c.id}">Borrar</button></div></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>Sin categorías</strong>Crea tus primeras categorías.</div>`}</article></section>`;
   }
 
   function renderGoals() {
-    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🎯</div><div><h3>Metas de ahorro</h3><p>Objetivos personales o familiares con progreso, fecha límite y notas.</p></div></div></section><section class="goals-grid"><article class="section-card"><h4>Nueva meta de ahorro</h4><form id="goalForm"><div class="field"><label>Nombre de la meta</label><input name="name" required placeholder="Ej. Fondo de emergencia, Vacaciones 2026" /></div><div class="inline-grid"><div class="field"><label>Importe objetivo (€)</label><input name="target_amount" type="number" step="0.01" required /></div><div class="field"><label>Ahorro acumulado (€)</label><input name="current_amount" type="number" step="0.01" value="0" /></div></div><div class="inline-grid"><div class="field"><label>Fecha límite</label><input name="deadline" type="date" /></div><div class="field"><label>Icono</label><select name="emoji"><option>🎯</option><option>🏠</option><option>🚗</option><option>✈️</option><option>🛟</option><option>💰</option></select></div></div><div class="field"><label>Notas</label><textarea name="notes" placeholder="Describe para qué es esta meta o cómo vas a ahorrar"></textarea></div><button class="btn primary" type="submit">Guardar meta</button></form></article><article class="section-card"><h4>Mis metas</h4>${state.goals.length ? state.goals.map(g=>{ const p = pct(g.current_amount, g.target_amount); return `<div class="goal-card"><header><h5>${escapeHtml(g.emoji || '🎯')} ${escapeHtml(g.name)}</h5><button class="btn small danger" data-delete-goal="${g.id}">Borrar</button></header><div class="goal-progress-info"><span>${money(g.current_amount)} / ${money(g.target_amount)}</span><b>${p}%</b></div><div class="goal-bar"><span style="width:${p}%"></span></div><p class="hint">${escapeHtml(g.notes || '')}</p></div>`; }).join("") : `<div class="empty-state"><strong>Sin metas todavía</strong>Añade tu primer objetivo de ahorro.</div>`}</article></section>`;
+    return `<section class="section-header"><div class="section-icon-row"><div class="section-badge">🎯</div><div><h3>Metas de ahorro</h3><p>Objetivos personales o familiares con progreso, fecha límite y notas.</p></div></div></section><section class="goals-grid"><article class="section-card"><h4 id="goalFormTitle">Nueva meta de ahorro</h4><form id="goalForm"><input name="id" type="hidden" /><div class="field"><label>Nombre de la meta</label><input name="name" required placeholder="Ej. Fondo de emergencia, Vacaciones 2026" /></div><div class="inline-grid"><div class="field"><label>Importe objetivo (€)</label><input name="target_amount" type="number" step="0.01" required /></div><div class="field"><label>Ahorro acumulado (€)</label><input name="current_amount" type="number" step="0.01" value="0" /></div></div><div class="inline-grid"><div class="field"><label>Fecha límite</label><input name="deadline" type="date" /></div><div class="field"><label>Icono</label><select name="emoji"><option>🎯</option><option>🏠</option><option>🚗</option><option>✈️</option><option>🛟</option><option>💰</option></select></div></div><div class="field"><label>Notas</label><textarea name="notes" placeholder="Describe para qué es esta meta o cómo vas a ahorrar"></textarea></div><div class="form-actions"><button class="btn primary" id="saveGoalBtn" type="submit">Guardar meta</button><button class="btn ghost" type="button" id="cancelGoalEdit" hidden>Cancelar edición</button></div></form></article><article class="section-card"><h4>Mis metas</h4>${state.goals.length ? state.goals.map(g=>{ const p = pct(g.current_amount, g.target_amount); return `<div class="goal-card"><header><h5>${escapeHtml(g.emoji || '🎯')} ${escapeHtml(g.name)}</h5><div class="td-actions"><button class="btn small" data-edit-goal="${g.id}">Editar</button><button class="btn small danger" data-delete-goal="${g.id}">Borrar</button></div></header><div class="goal-progress-info"><span>${money(g.current_amount)} / ${money(g.target_amount)}</span><b>${p}%</b></div><div class="goal-bar"><span style="width:${p}%"></span></div><p class="hint">${escapeHtml(g.notes || '')}</p></div>`; }).join("") : `<div class="empty-state"><strong>Sin metas todavía</strong>Añade tu primer objetivo de ahorro.</div>`}</article></section>`;
   }
 
   function renderVehicles() {
@@ -2143,6 +2234,197 @@ const F360V3 = (() => {
     renderApp();
   }
 
+  function showRegisterPanel(panelId) {
+    document.querySelectorAll('[data-flow-target]').forEach(btn => btn.classList.toggle('active', btn.dataset.flowTarget === panelId));
+    const panel = document.getElementById(panelId);
+    panel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function resetIncomeFormEdit() {
+    const form = document.getElementById('incomeForm');
+    if (!form) return;
+    form.reset();
+    setFormField(form, 'id', '');
+    setFormField(form, 'date', todayISO());
+    document.getElementById('incomeFormTitle') && (document.getElementById('incomeFormTitle').textContent = 'Nuevo ingreso puntual');
+    document.getElementById('saveIncomeBtn') && (document.getElementById('saveIncomeBtn').textContent = 'Guardar ingreso');
+    document.getElementById('cancelIncomeEdit') && (document.getElementById('cancelIncomeEdit').hidden = true);
+  }
+
+  function resetExpenseFormEdit() {
+    const form = document.getElementById('expenseForm');
+    if (!form) return;
+    form.reset();
+    setFormField(form, 'id', '');
+    setFormField(form, 'date', todayISO());
+    document.getElementById('expenseFormTitle') && (document.getElementById('expenseFormTitle').textContent = 'Nuevo gasto puntual');
+    document.getElementById('saveExpenseBtn') && (document.getElementById('saveExpenseBtn').textContent = 'Guardar gasto');
+    document.getElementById('cancelExpenseEdit') && (document.getElementById('cancelExpenseEdit').hidden = true);
+  }
+
+  function editMovement(id) {
+    const movement = state.movements.find(m => m.id === id);
+    if (!movement) return showToast('No encontré ese movimiento.', 'danger');
+    if (state.activeSection !== 'register') {
+      state.activeSection = 'register';
+      renderApp();
+      setTimeout(() => editMovement(id), 80);
+      return;
+    }
+    const isIncome = movement.type === 'income';
+    const form = document.getElementById(isIncome ? 'incomeForm' : 'expenseForm');
+    if (!form) return;
+    if (isIncome) resetExpenseFormEdit(); else resetIncomeFormEdit();
+    setFormField(form, 'id', movement.id);
+    setFormField(form, 'concept', movement.description || '');
+    setFormField(form, 'amount', movement.amount ?? '');
+    setFormField(form, 'date', dateOnly(movement.date) || todayISO());
+    setSelectField(form, 'category_id', movement.category_id || '');
+    setSelectField(form, 'member_id', movement.member_id || movement.user_id || state.user?.id || '');
+    setFormField(form, 'notes', movement.notes || '');
+    if (!isIncome) {
+      setSelectField(form, 'kind', movement.kind || (movement.is_shared ? 'shared' : 'personal'));
+      const sharedBox = form.querySelector('[name="is_shared"]');
+      if (sharedBox) sharedBox.checked = Boolean(movement.is_shared);
+      setSelectField(form, 'share_method', movement.share_method || 'equal');
+    }
+    const title = document.getElementById(isIncome ? 'incomeFormTitle' : 'expenseFormTitle');
+    const button = document.getElementById(isIncome ? 'saveIncomeBtn' : 'saveExpenseBtn');
+    const cancel = document.getElementById(isIncome ? 'cancelIncomeEdit' : 'cancelExpenseEdit');
+    if (title) title.textContent = isIncome ? 'Editando ingreso' : 'Editando gasto';
+    if (button) button.textContent = isIncome ? 'Actualizar ingreso' : 'Actualizar gasto';
+    if (cancel) cancel.hidden = false;
+    showRegisterPanel(isIncome ? 'incomePanel' : 'expensePanel');
+  }
+
+  function resetRecurringFormEdit() {
+    const form = document.getElementById('recurringForm');
+    if (!form) return;
+    form.reset();
+    setFormField(form, 'id', '');
+    setFormField(form, 'start_date', todayISO());
+    const active = form.querySelector('[name="active"]');
+    if (active) active.checked = true;
+    document.getElementById('recurringFormTitle') && (document.getElementById('recurringFormTitle').textContent = 'Nuevo recurrente o servicio variable');
+    document.getElementById('saveRecurringBtn') && (document.getElementById('saveRecurringBtn').textContent = 'Guardar automático');
+    document.getElementById('cancelRecurringEdit') && (document.getElementById('cancelRecurringEdit').hidden = true);
+  }
+
+  function editRecurring(id) {
+    const recurring = state.recurring.find(r => r.id === id);
+    if (!recurring) return showToast('No encontré ese recurrente.', 'danger');
+    if (state.activeSection !== 'register') {
+      state.activeSection = 'register';
+      renderApp();
+      setTimeout(() => editRecurring(id), 80);
+      return;
+    }
+    const form = document.getElementById('recurringForm');
+    if (!form) return;
+    setFormField(form, 'id', recurring.id);
+    setFormField(form, 'description', recurring.description || '');
+    setFormField(form, 'amount', recurring.amount ?? '');
+    setFormField(form, 'start_date', dateOnly(recurring.start_date || recurring.date) || todayISO());
+    setSelectField(form, 'category_id', recurring.category_id || '');
+    setSelectField(form, 'member_id', recurring.member_id || recurring.user_id || state.user?.id || '');
+    setSelectField(form, 'type', recurring.type || 'expense');
+    setFormField(form, 'day_of_month', recurring.day_of_month || 1);
+    setSelectField(form, 'frequency', recurring.frequency || 'monthly');
+    setSelectField(form, 'amount_mode', recurring.amount_mode || 'fixed');
+    setSelectField(form, 'end_mode', recurring.end_mode || 'indefinite');
+    setFormField(form, 'fixed_months', recurring.fixed_months ?? '');
+    setFormField(form, 'fixed_years', recurring.fixed_years ?? '');
+    setFormField(form, 'end_date', dateOnly(recurring.end_date) || '');
+    setFormField(form, 'debt_original_amount', recurring.debt_original_amount ?? '');
+    setFormField(form, 'debt_lender', recurring.debt_lender || '');
+    const shared = form.querySelector('[name="is_shared"]');
+    if (shared) shared.checked = Boolean(recurring.is_shared);
+    const active = form.querySelector('[name="active"]');
+    if (active) active.checked = recurring.active !== false;
+    setFormField(form, 'notes', recurring.notes || '');
+    document.getElementById('recurringFormTitle') && (document.getElementById('recurringFormTitle').textContent = 'Editando recurrente');
+    document.getElementById('saveRecurringBtn') && (document.getElementById('saveRecurringBtn').textContent = 'Actualizar automático');
+    document.getElementById('cancelRecurringEdit') && (document.getElementById('cancelRecurringEdit').hidden = false);
+    showRegisterPanel('recurringPanel');
+  }
+
+  async function toggleRecurring(id) {
+    const recurring = state.recurring.find(r => r.id === id);
+    if (!recurring) return showToast('No encontré ese recurrente.', 'danger');
+    if (!can('recurring', 'edit') && !can('register', 'edit')) return showToast('No tienes permiso para cambiar recurrentes.', 'danger');
+    await withError(supabase.from('recurring_movements').update({ active: recurring.active === false }).eq('id', id).eq('household_id', state.currentHouseholdId), recurring.active === false ? 'Recurrente activado.' : 'Recurrente pausado.');
+    await loadHouseholdData();
+    renderApp();
+  }
+
+  function editCategory(id) {
+    const category = state.categories.find(c => c.id === id);
+    if (!category) return showToast('No encontré esa categoría.', 'danger');
+    if (state.activeSection !== 'categories') {
+      state.activeSection = 'categories';
+      renderApp();
+      setTimeout(() => editCategory(id), 80);
+      return;
+    }
+    const form = document.getElementById('categoryForm');
+    if (!form) return;
+    setFormField(form, 'id', category.id);
+    setFormField(form, 'name', category.name || '');
+    setSelectField(form, 'type', category.type || 'expense');
+    setFormField(form, 'budget', category.budget ?? '');
+    setFormField(form, 'color', category.color || '#4aa8ff');
+    document.getElementById('categoryFormTitle') && (document.getElementById('categoryFormTitle').textContent = 'Editando categoría');
+    document.getElementById('saveCategoryBtn') && (document.getElementById('saveCategoryBtn').textContent = 'Actualizar categoría');
+    document.getElementById('cancelCategoryEdit') && (document.getElementById('cancelCategoryEdit').hidden = false);
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function resetCategoryFormEdit() {
+    const form = document.getElementById('categoryForm');
+    if (!form) return;
+    form.reset();
+    setFormField(form, 'id', '');
+    setFormField(form, 'color', '#4aa8ff');
+    document.getElementById('categoryFormTitle') && (document.getElementById('categoryFormTitle').textContent = 'Nueva categoría');
+    document.getElementById('saveCategoryBtn') && (document.getElementById('saveCategoryBtn').textContent = 'Guardar categoría');
+    document.getElementById('cancelCategoryEdit') && (document.getElementById('cancelCategoryEdit').hidden = true);
+  }
+
+  function editGoal(id) {
+    const goal = state.goals.find(g => g.id === id);
+    if (!goal) return showToast('No encontré esa meta.', 'danger');
+    if (state.activeSection !== 'goals') {
+      state.activeSection = 'goals';
+      renderApp();
+      setTimeout(() => editGoal(id), 80);
+      return;
+    }
+    const form = document.getElementById('goalForm');
+    if (!form) return;
+    setFormField(form, 'id', goal.id);
+    setFormField(form, 'name', goal.name || '');
+    setFormField(form, 'target_amount', goal.target_amount ?? '');
+    setFormField(form, 'current_amount', goal.current_amount ?? 0);
+    setFormField(form, 'deadline', dateOnly(goal.deadline) || '');
+    setSelectField(form, 'emoji', goal.emoji || '🎯');
+    setFormField(form, 'notes', goal.notes || '');
+    document.getElementById('goalFormTitle') && (document.getElementById('goalFormTitle').textContent = 'Editando meta');
+    document.getElementById('saveGoalBtn') && (document.getElementById('saveGoalBtn').textContent = 'Actualizar meta');
+    document.getElementById('cancelGoalEdit') && (document.getElementById('cancelGoalEdit').hidden = false);
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function resetGoalFormEdit() {
+    const form = document.getElementById('goalForm');
+    if (!form) return;
+    form.reset();
+    setFormField(form, 'id', '');
+    setFormField(form, 'current_amount', 0);
+    document.getElementById('goalFormTitle') && (document.getElementById('goalFormTitle').textContent = 'Nueva meta de ahorro');
+    document.getElementById('saveGoalBtn') && (document.getElementById('saveGoalBtn').textContent = 'Guardar meta');
+    document.getElementById('cancelGoalEdit') && (document.getElementById('cancelGoalEdit').hidden = true);
+  }
+
   function bindSectionActions() {
     document.querySelectorAll('[data-flow-target]').forEach(btn => btn.addEventListener('click', () => { document.querySelectorAll('[data-flow-target]').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); document.getElementById(btn.dataset.flowTarget)?.scrollIntoView({behavior:'smooth', block:'start'}); }));
     document.querySelectorAll('[data-set-month]').forEach(btn => btn.addEventListener('click', () => { state.filters.month = btn.dataset.setMonth; renderApp(); }));
@@ -2167,7 +2449,11 @@ const F360V3 = (() => {
     document.querySelectorAll('[data-delete-movement]').forEach(btn => btn.addEventListener('click', () => deleteMovement(btn.dataset.deleteMovement)));
     document.querySelectorAll('[data-edit-movement]').forEach(btn => btn.addEventListener('click', () => editMovement(btn.dataset.editMovement)));
     document.querySelectorAll('[data-delete-category]').forEach(btn => btn.addEventListener('click', () => deleteCategory(btn.dataset.deleteCategory)));
+    document.querySelectorAll('[data-edit-category]').forEach(btn => btn.addEventListener('click', () => editCategory(btn.dataset.editCategory)));
+    document.getElementById('cancelCategoryEdit')?.addEventListener('click', resetCategoryFormEdit);
     document.querySelectorAll('[data-delete-goal]').forEach(btn => btn.addEventListener('click', () => deleteGoal(btn.dataset.deleteGoal)));
+    document.querySelectorAll('[data-edit-goal]').forEach(btn => btn.addEventListener('click', () => editGoal(btn.dataset.editGoal)));
+    document.getElementById('cancelGoalEdit')?.addEventListener('click', resetGoalFormEdit);
     document.querySelectorAll('[data-edit-vehicle]').forEach(btn => btn.addEventListener('click', () => editVehicle(btn.dataset.editVehicle)));
     document.querySelectorAll('[data-delete-vehicle]').forEach(btn => btn.addEventListener('click', () => deleteVehicle(btn.dataset.deleteVehicle)));
     document.querySelectorAll('[data-edit-vehicle-record]').forEach(btn => btn.addEventListener('click', () => editVehicleRecord(btn.dataset.editVehicleRecord)));
@@ -2176,6 +2462,11 @@ const F360V3 = (() => {
     document.getElementById('cancelInsuranceEdit')?.addEventListener('click', resetInsuranceFormEdit);
     document.getElementById('cancelVehicleRecordEdit')?.addEventListener('click', resetVehicleRecordFormEdit);
     document.querySelectorAll('[data-delete-recurring]').forEach(btn => btn.addEventListener('click', () => deleteRecurring(btn.dataset.deleteRecurring)));
+    document.querySelectorAll('[data-edit-recurring]').forEach(btn => btn.addEventListener('click', () => editRecurring(btn.dataset.editRecurring)));
+    document.querySelectorAll('[data-toggle-recurring]').forEach(btn => btn.addEventListener('click', () => toggleRecurring(btn.dataset.toggleRecurring)));
+    document.getElementById('cancelRecurringEdit')?.addEventListener('click', resetRecurringFormEdit);
+    document.getElementById('cancelIncomeEdit')?.addEventListener('click', resetIncomeFormEdit);
+    document.getElementById('cancelExpenseEdit')?.addEventListener('click', resetExpenseFormEdit);
     const permissionSelect = document.getElementById('permissionUserSelect');
     if (permissionSelect) { renderPermissionEditor(permissionSelect.value); permissionSelect.addEventListener('change', e => renderPermissionEditor(e.target.value)); }
     document.getElementById('savePermissionsBtn')?.addEventListener('click', handleSavePermissions);
@@ -2183,27 +2474,50 @@ const F360V3 = (() => {
 
   async function handleIncomeSubmit(event) {
     event.preventDefault();
-    if (!can("movements", "create") && !can("register", "create")) return showToast("No tienes permiso para crear ingresos.", "danger");
     const f = new FormData(event.currentTarget);
+    const id = String(f.get("id") || "").trim();
+    if (id) {
+      if (!can("movements", "edit") && !can("register", "edit")) return showToast("No tienes permiso para editar ingresos.", "danger");
+    } else if (!can("movements", "create") && !can("register", "create")) {
+      return showToast("No tienes permiso para crear ingresos.", "danger");
+    }
     const payload = { household_id: state.currentHouseholdId, user_id: state.user.id, member_id: String(f.get("member_id") || state.user.id), type: "income", amount: parseAmount(f.get("amount")), date: f.get("date") || todayISO(), category_id: f.get("category_id") || null, description: String(f.get("concept") || "Ingreso").trim(), notes: String(f.get("notes") || "").trim(), kind: "personal", share_method: "none", is_shared: false };
-    await insertWithSchemaFallback("movements", payload, "Ingreso guardado.", ["household_id","user_id","member_id","type","amount","date","category_id","description","is_shared"]);
+    if (id) {
+      await updateWithSchemaFallback("movements", payload, { id, household_id: state.currentHouseholdId }, "Ingreso actualizado.", ["household_id","user_id","member_id","type","amount","date","category_id","description","is_shared"]);
+    } else {
+      await insertWithSchemaFallback("movements", payload, "Ingreso guardado.", ["household_id","user_id","member_id","type","amount","date","category_id","description","is_shared"]);
+    }
     await loadHouseholdData(); renderApp();
   }
 
   async function handleExpenseSubmit(event) {
     event.preventDefault();
-    if (!can("movements", "create") && !can("register", "create")) return showToast("No tienes permiso para crear gastos.", "danger");
     const f = new FormData(event.currentTarget);
+    const id = String(f.get("id") || "").trim();
+    if (id) {
+      if (!can("movements", "edit") && !can("register", "edit")) return showToast("No tienes permiso para editar gastos.", "danger");
+    } else if (!can("movements", "create") && !can("register", "create")) {
+      return showToast("No tienes permiso para crear gastos.", "danger");
+    }
     const isShared = Boolean(f.get("is_shared")) || f.get("kind") === "shared";
     const payload = { household_id: state.currentHouseholdId, user_id: state.user.id, member_id: String(f.get("member_id") || state.user.id), type: "expense", amount: parseAmount(f.get("amount")), date: f.get("date") || todayISO(), category_id: f.get("category_id") || null, description: String(f.get("concept") || "Gasto").trim(), notes: String(f.get("notes") || "").trim(), kind: String(f.get("kind") || "personal"), share_method: String(f.get("share_method") || "equal"), is_shared: isShared };
-    await insertWithSchemaFallback("movements", payload, "Gasto guardado.", ["household_id","user_id","member_id","type","amount","date","category_id","description","is_shared"]);
+    if (id) {
+      await updateWithSchemaFallback("movements", payload, { id, household_id: state.currentHouseholdId }, "Gasto actualizado.", ["household_id","user_id","member_id","type","amount","date","category_id","description","is_shared"]);
+    } else {
+      await insertWithSchemaFallback("movements", payload, "Gasto guardado.", ["household_id","user_id","member_id","type","amount","date","category_id","description","is_shared"]);
+    }
     await loadHouseholdData(); renderApp();
   }
 
   async function handleRecurringSubmit(event) {
     event.preventDefault();
-    if (!can("recurring", "create") && !can("register", "create")) return showToast("No tienes permiso para crear recurrentes.", "danger");
     const f = new FormData(event.currentTarget);
+    const id = String(f.get("id") || "").trim();
+    if (id) {
+      if (!can("recurring", "edit") && !can("register", "edit")) return showToast("No tienes permiso para editar recurrentes.", "danger");
+    } else if (!can("recurring", "create") && !can("register", "create")) {
+      return showToast("No tienes permiso para crear recurrentes.", "danger");
+    }
     const payload = {
       household_id: state.currentHouseholdId,
       user_id: state.user.id,
@@ -2227,7 +2541,11 @@ const F360V3 = (() => {
       debt_lender: String(f.get("debt_lender") || "").trim() || null,
       notes: String(f.get("notes") || "").trim()
     };
-    await insertWithSchemaFallback("recurring_movements", payload, "Recurrente guardado.", ["household_id","user_id","member_id","type","amount","category_id","description","day_of_month","frequency","active","is_shared","start_date"]);
+    if (id) {
+      await updateWithSchemaFallback("recurring_movements", payload, { id, household_id: state.currentHouseholdId }, "Recurrente actualizado.", ["household_id","user_id","member_id","type","amount","category_id","description","day_of_month","frequency","active","is_shared","start_date"]);
+    } else {
+      await insertWithSchemaFallback("recurring_movements", payload, "Recurrente guardado.", ["household_id","user_id","member_id","type","amount","category_id","description","day_of_month","frequency","active","is_shared","start_date"]);
+    }
     await loadHouseholdData(); renderApp();
   }
 
@@ -2281,19 +2599,37 @@ const F360V3 = (() => {
 
   async function handleCategorySubmit(event) {
     event.preventDefault();
-    if (!can("categories", "create")) return showToast("No tienes permiso para crear categorías.", "danger");
     const f = new FormData(event.currentTarget);
+    const id = String(f.get("id") || "").trim();
+    if (id) {
+      if (!can("categories", "edit")) return showToast("No tienes permiso para editar categorías.", "danger");
+    } else if (!can("categories", "create")) {
+      return showToast("No tienes permiso para crear categorías.", "danger");
+    }
     const payload = { household_id: state.currentHouseholdId, name: String(f.get("name") || "").trim(), type: f.get("type"), color: f.get("color") || "#4aa8ff", budget: parseAmount(f.get("budget")) };
-    await insertWithSchemaFallback("categories", payload, "Categoría creada.", ["household_id","name","type","color"]);
+    if (id) {
+      await updateWithSchemaFallback("categories", payload, { id, household_id: state.currentHouseholdId }, "Categoría actualizada.", ["household_id","name","type","color"]);
+    } else {
+      await insertWithSchemaFallback("categories", payload, "Categoría creada.", ["household_id","name","type","color"]);
+    }
     await loadHouseholdData(); renderApp();
   }
 
   async function handleGoalSubmit(event) {
     event.preventDefault();
-    if (!can("goals", "create")) return showToast("No tienes permiso para crear metas.", "danger");
     const f = new FormData(event.currentTarget);
+    const id = String(f.get("id") || "").trim();
+    if (id) {
+      if (!can("goals", "edit")) return showToast("No tienes permiso para editar metas.", "danger");
+    } else if (!can("goals", "create")) {
+      return showToast("No tienes permiso para crear metas.", "danger");
+    }
     const payload = { household_id: state.currentHouseholdId, user_id: state.user.id, name: String(f.get("name") || "").trim(), target_amount: parseAmount(f.get("target_amount")), current_amount: parseAmount(f.get("current_amount")), deadline: f.get("deadline") || null, emoji: String(f.get("emoji") || "🎯"), notes: String(f.get("notes") || "") };
-    await insertWithSchemaFallback("goals", payload, "Meta guardada.", ["household_id","user_id","name","target_amount","current_amount","deadline"]);
+    if (id) {
+      await updateWithSchemaFallback("goals", payload, { id, household_id: state.currentHouseholdId }, "Meta actualizada.", ["household_id","user_id","name","target_amount","current_amount","deadline"]);
+    } else {
+      await insertWithSchemaFallback("goals", payload, "Meta guardada.", ["household_id","user_id","name","target_amount","current_amount","deadline"]);
+    }
     await loadHouseholdData(); renderApp();
   }
 
