@@ -11306,3 +11306,57 @@ body {
     align-items: flex-start !important;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   HOTFIX Alberto · Fondo común en teléfono: Disponible/Faltante
+   En escritorio se mantiene lado a lado; en modo teléfono se apilan.
+   ───────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .app-old-mirror .house-pot-status-card {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    justify-self: stretch !important;
+    border-radius: 24px !important;
+  }
+
+  .app-old-mirror .house-pot-status {
+    min-height: auto !important;
+    padding: clamp(18px, 5vw, 24px) !important;
+  }
+
+  .app-old-mirror .house-pot-status.available {
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--f360-border) !important;
+  }
+
+  .app-old-mirror .house-pot-status.shortfall {
+    border-left: 0 !important;
+  }
+
+  .app-old-mirror .house-pot-status strong {
+    display: flex !important;
+    justify-content: flex-start !important;
+    align-items: flex-end !important;
+    gap: .32rem !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+    text-overflow: unset !important;
+  }
+
+  .app-old-mirror .house-pot-status .house-pot-amount-value {
+    font-size: clamp(2.15rem, 13.5vw, 3.45rem) !important;
+    line-height: .9 !important;
+  }
+
+  .app-old-mirror .house-pot-status .house-pot-amount-currency {
+    font-size: clamp(1.05rem, 5vw, 1.45rem) !important;
+    margin-bottom: .16em !important;
+  }
+
+  .app-old-mirror .house-pot-status em {
+    font-size: .9rem !important;
+    line-height: 1.35 !important;
+  }
+}
