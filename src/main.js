@@ -2090,6 +2090,14 @@ const F360V3 = (() => {
   const monthName = (key = activeMonth()) => `${months[Math.max(0, Number(String(key).slice(5,7)) - 1)] || "Mes"} de ${String(key).slice(0,4)}`;
   const pct = (part, total) => total ? Math.max(0, Math.min(100, Math.round((Number(part || 0) / Number(total || 0)) * 100))) : 0;
   const signedMoney = (n = 0) => `${Number(n || 0) >= 0 ? "+" : ""}${money(n)}`;
+  const moneyParts = (n = 0) => {
+    const full = money(n);
+    return {
+      full,
+      value: full.replace(/\s*€\s*$/, "").trim(),
+      currency: "€"
+    };
+  };
   const shortDate = (v) => v ? new Date(String(v).slice(0,10) + "T00:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }) : "-";
   const yearOf = (m = activeMonth()) => String(m).slice(0, 4);
   const monthNo = (m = activeMonth()) => Number(String(m).slice(5, 7));
@@ -2370,6 +2378,8 @@ const F360V3 = (() => {
         : "Mes cubierto";
     const availableNow = Math.max(0, pot.remaining);
     const shortfallNow = Math.max(0, pot.shortfall);
+    const availableMoney = moneyParts(availableNow);
+    const shortfallMoney = moneyParts(shortfallNow);
     const availableHint = availableNow > 0
       ? `${pot.contributors.length} aporte(s): ${money(pot.available)} · gastos casa: ${money(pot.spent)}`
       : pot.shortfall > 0
@@ -2407,12 +2417,12 @@ const F360V3 = (() => {
         <div class="house-pot-status-card">
           <div class="house-pot-status available">
             <span>Disponible</span>
-            <strong>${money(availableNow)}</strong>
+            <strong aria-label="${escapeHtml(availableMoney.full)}"><span class="house-pot-amount-value">${escapeHtml(availableMoney.value)}</span><small class="house-pot-amount-currency">${escapeHtml(availableMoney.currency)}</small></strong>
             <em>${escapeHtml(availableHint)}</em>
           </div>
           <div class="house-pot-status shortfall">
             <span>Faltante</span>
-            <strong>${money(shortfallNow)}</strong>
+            <strong aria-label="${escapeHtml(shortfallMoney.full)}"><span class="house-pot-amount-value">${escapeHtml(shortfallMoney.value)}</span><small class="house-pot-amount-currency">${escapeHtml(shortfallMoney.currency)}</small></strong>
             <em>${escapeHtml(shortfallHint)}</em>
           </div>
         </div>

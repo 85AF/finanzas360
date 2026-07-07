@@ -10268,13 +10268,20 @@ body {
 /* POTE DEL HOGAR: rediseño compacto, sin desbordar números */
 .app-old-mirror .house-pot-head {
   display: grid !important;
-  grid-template-columns: minmax(0, 1fr) minmax(460px, 640px) !important;
-  gap: clamp(18px, 2.6vw, 34px) !important;
+  grid-template-columns: minmax(0, 1.08fr) minmax(520px, 1fr) !important;
+  gap: clamp(18px, 2.3vw, 30px) !important;
   align-items: start !important;
 }
 
 .app-old-mirror .house-pot-head > div:first-child {
   min-width: 0 !important;
+}
+
+.app-old-mirror .house-pot-head > div:last-child {
+  min-width: 0 !important;
+  width: 100% !important;
+  display: flex !important;
+  justify-content: center !important;
 }
 
 .app-old-mirror .house-pot-head h4 {
@@ -10294,9 +10301,10 @@ body {
 .app-old-mirror .house-pot-status-card {
   display: grid !important;
   grid-template-columns: 1fr 1fr !important;
-  width: min(100%, 640px) !important;
+  width: 100% !important;
+  max-width: 760px !important;
   min-width: 0 !important;
-  justify-self: stretch !important;
+  justify-self: center !important;
   border-radius: 26px !important;
   overflow: hidden !important;
   background: var(--f360-surface) !important;
@@ -10333,14 +10341,31 @@ body {
 }
 
 .app-old-mirror .house-pot-status strong {
-  display: block !important;
+  display: flex !important;
+  align-items: flex-end !important;
+  gap: .34rem !important;
   max-width: 100% !important;
-  font-size: clamp(1.9rem, 3.5vw, 3rem) !important;
-  line-height: .95 !important;
-  letter-spacing: -0.035em !important;
+  line-height: .92 !important;
+  letter-spacing: -0.025em !important;
   white-space: nowrap !important;
   overflow: visible !important;
   text-overflow: unset !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+.app-old-mirror .house-pot-status .house-pot-amount-value {
+  display: inline-block !important;
+  font-size: clamp(1.75rem, 3.15vw, 2.95rem) !important;
+  line-height: .92 !important;
+}
+
+.app-old-mirror .house-pot-status .house-pot-amount-currency {
+  display: inline-block !important;
+  flex: 0 0 auto !important;
+  font-size: clamp(1.05rem, 1.45vw, 1.55rem) !important;
+  line-height: 1 !important;
+  margin-bottom: .16em !important;
+  font-weight: 900 !important;
 }
 
 .app-old-mirror .house-pot-status.available strong {
@@ -10356,6 +10381,7 @@ body {
   font-style: normal !important;
   font-size: .86rem !important;
   line-height: 1.25 !important;
+  max-width: none !important;
 }
 
 .app-old-mirror .house-pot-stats {
@@ -10443,11 +10469,11 @@ body {
 
 @media (min-width: 1380px) {
   .app-old-mirror .house-pot-head {
-    grid-template-columns: minmax(0, 1fr) minmax(540px, 760px) !important;
+    grid-template-columns: minmax(0, 1fr) minmax(620px, 1fr) !important;
   }
 
   .app-old-mirror .house-pot-status-card {
-    width: min(100%, 760px) !important;
+    max-width: 840px !important;
   }
 }
 
@@ -10458,8 +10484,8 @@ body {
   }
 
   .app-old-mirror .house-pot-status-card {
-    width: min(100%, 760px) !important;
-    max-width: 760px !important;
+    width: 100% !important;
+    max-width: 100% !important;
   }
 
   .app-old-mirror .house-pot-stats {
@@ -10546,9 +10572,17 @@ body {
   }
 
   .app-old-mirror .house-pot-status strong {
-    font-size: clamp(2.15rem, 14vw, 3.65rem) !important;
     white-space: normal !important;
     overflow-wrap: anywhere !important;
+    gap: .28rem !important;
+  }
+
+  .app-old-mirror .house-pot-status .house-pot-amount-value {
+    font-size: clamp(2rem, 12.2vw, 3.3rem) !important;
+  }
+
+  .app-old-mirror .house-pot-status .house-pot-amount-currency {
+    font-size: clamp(1rem, 5.4vw, 1.45rem) !important;
   }
 
   .app-old-mirror .house-pot-status em {
