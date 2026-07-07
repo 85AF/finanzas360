@@ -10268,8 +10268,8 @@ body {
 /* POTE DEL HOGAR: rediseño compacto, sin desbordar números */
 .app-old-mirror .house-pot-head {
   display: grid !important;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 430px) !important;
-  gap: clamp(18px, 3vw, 40px) !important;
+  grid-template-columns: minmax(0, 1fr) minmax(460px, 640px) !important;
+  gap: clamp(18px, 2.6vw, 34px) !important;
   align-items: start !important;
 }
 
@@ -10294,8 +10294,9 @@ body {
 .app-old-mirror .house-pot-status-card {
   display: grid !important;
   grid-template-columns: 1fr 1fr !important;
-  width: 100% !important;
+  width: min(100%, 640px) !important;
   min-width: 0 !important;
+  justify-self: stretch !important;
   border-radius: 26px !important;
   overflow: hidden !important;
   background: var(--f360-surface) !important;
@@ -10334,12 +10335,12 @@ body {
 .app-old-mirror .house-pot-status strong {
   display: block !important;
   max-width: 100% !important;
-  font-size: clamp(2rem, 4.2vw, 3.25rem) !important;
+  font-size: clamp(1.9rem, 3.5vw, 3rem) !important;
   line-height: .95 !important;
-  letter-spacing: -0.055em !important;
+  letter-spacing: -0.035em !important;
   white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: clip !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
 }
 
 .app-old-mirror .house-pot-status.available strong {
@@ -10439,6 +10440,17 @@ body {
   }
 }
 
+
+@media (min-width: 1380px) {
+  .app-old-mirror .house-pot-head {
+    grid-template-columns: minmax(0, 1fr) minmax(540px, 760px) !important;
+  }
+
+  .app-old-mirror .house-pot-status-card {
+    width: min(100%, 760px) !important;
+  }
+}
+
 /* Tablet: dos columnas donde aporta, una donde estorba */
 @media (max-width: 1180px) {
   .app-old-mirror .house-pot-head {
@@ -10446,7 +10458,8 @@ body {
   }
 
   .app-old-mirror .house-pot-status-card {
-    max-width: 680px !important;
+    width: min(100%, 760px) !important;
+    max-width: 760px !important;
   }
 
   .app-old-mirror .house-pot-stats {
