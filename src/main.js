@@ -494,6 +494,161 @@ function normalizeComparableText(value = "") {
     .trim();
 }
 
+
+// Reglas domésticas 2026: nóminas, servicios a mes vencido,
+// agua/gas bimensual y fondo común automático del hogar.
+const HOUSE_POT_MONTHLY_CONTRIBUTION_DEFAULT = 450;
+const PAYROLL_TERMS = ["nomina", "sueldo", "salario", "paga", "payroll", "nómina"];
+const HOUSE_SERVICE_TERMS = ["alquiler", "arriendo", "renta", "luz", "electricidad", "agua", "gas", "internet", "fibra", "wifi", "comunidad", "telefono", "teléfono"];
+const HOUSE_FOOD_TERMS = ["comida", "mercado", "supermercado", "super", "jamon", "jamón", "queso", "pan", "leche", "huevos", "verdura", "fruta", "despensa", "charcuteria", "charcutería"];
+const HOUSE_CLEANING_TERMS = ["limpieza", "detergente", "papel", "lavavajillas", "suavizante", "lejia", "lejía", "cocina", "hogar", "casa"];
+const BIMONTHLY_SERVICE_TERMS = ["agua", "gas"];
+const TRANSPORT_EXCLUSION_TERMS = ["gasolina", "gasoil", "diesel", "diésel", "combustible", "repostaje", "moto", "coche", "carro", "vehiculo", "vehículo", "parking", "peaje", "neumatico", "neumático", "neumaticos", "neumáticos", "itv", "aceite"];
+
+function normalizeFinancialText(...values) {
+  return normalizeComparableText(values.filter(Boolean).join(" "));
+}
+
+function normalizedWordSet(value = "") {
+  return new Set(normalizeFinancialText(value).split(/\s+/).filter(Boolean));
+}
+
+function textHasTerm(text = "", term = "") {
+  const normalizedText = normalizeFinancialText(text);
+  const normalizedTerm = normalizeFinancialText(term);
+  if (!normalizedText || !normalizedTerm) return false;
+  if (normalizedTerm.includes(" ")) return normalizedText.includes(normalizedTerm);
+  return normalizedWordSet(normalizedText).has(normalizedTerm);
+}
+
+function textHasAnyTerm(text = "", terms = []) {
+  return terms.some(term => textHasTerm(text, term));
+}
+
+function categoryTextFromId(categoryId) {
+  return categoryName(categoryId || "");
+}
+
+function movementRuleTextFromParts(parts = {}) {
+  return normalizeFinancialText(parts.description, parts.notes, parts.kind, categoryTextFromId(parts.category_id));
+}
+
+function formRuleText(formData) {
+  return movementRuleTextFromParts({
+    description: formData.get("concept") || formData.get("description"),
+    notes: formData.get("notes"),
+    kind: formData.get("kind"),
+    category_id: formData.get("category_id")
+  });
+}
+
+function isPayrollText(text = "") {
+  return textHasAnyTerm(text, PAYROLL_TERMS);
+}
+
+function isTransportOrVehicleText(text = "") {
+  return textHasAnyTerm(text, TRANSPORT_EXCLUSION_TERMS);
+}
+
+function isHouseServiceText(text = "") {
+  if (isTransportOrVehicleText(text)) return false;
+  return textHasAnyTerm(text, HOUSE_SERVICE_TERMS);
+}
+
+function isHouseFoodText(text = "") {
+  if (isTransportOrVehicleText(text)) return false;
+  return textHasAnyTerm(text, HOUSE_FOOD_TERMS);
+}
+
+function isHouseExpenseText(text = "") {
+  if (isTransportOrVehicleText(text)) return false;
+  return textHasAnyTerm(text, [...HOUSE_SERVICE_TERMS, ...HOUSE_FOOD_TERMS, ...HOUSE_CLEANING_TERMS]);
+}
+
+function isBimonthlyServiceText(text = "") {
+  if (isTransportOrVehicleText(text)) return false;
+  return textHasAnyTerm(text, BIMONTHLY_SERVICE_TERMS);
+}
+
+function clampPayrollDay(dayValue) {
+  const day = Number(dayValue || 5);
+  if (!Number.isFinite(day) || day <= 0) return 5;
+  return Math.max(1, Math.min(7, Math.round(day)));
+}
+
+function mergeRuleNotes(notes = "", additions = []) {
+  const cleanNotes = String(notes || "").trim();
+  const existing = normalizeFinancialText(cleanNotes);
+  const extras = additions
+    .map(x => String(x || "").trim())
+    .filter(Boolean)
+    .filter(x => !existing.includes(normalizeFinancialText(x).slice(0, 36)));
+  return [cleanNotes, ...extras].filter(Boolean).join(cleanNotes && extras.length ? " · " : "");
+}
+
+function shouldAffectHousePot(movement = {}) {
+  if (!movement || movement.type !== "expense" || !movement.is_shared) return false;
+  const kind = normalizeFinancialText(movement.kind || "");
+  const text = movementRuleTextFromParts(movement);
+  if (kind === "vehicle" || kind === "fuel" || isTransportOrVehicleText(text)) return false;
+  if (kind === "shared") return true;
+  return isHouseExpenseText(text);
+}
+
+function applySmartRecurringRulesToForm(form) {
+  if (!form) return;
+  const f = new FormData(form);
+  const type = String(f.get("type") || "expense");
+  const text = formRuleText(f);
+  const dayInput = form.querySelector('[name="day_of_month"]');
+  const frequencySelect = form.querySelector('[name="frequency"]');
+  const amountModeSelect = form.querySelector('[name="amount_mode"]');
+  const sharedBox = form.querySelector('[name="is_shared"]');
+  const notesField = form.querySelector('[name="notes"]');
+
+  if (type === "income" && isPayrollText(text)) {
+    if (dayInput) dayInput.value = String(clampPayrollDay(dayInput.value || 5));
+    if (notesField) notesField.value = mergeRuleNotes(notesField.value, ["Regla nómina: se cobra del día 1 al 7 del mes siguiente trabajado."]);
+    return;
+  }
+
+  if (type === "expense" && isBimonthlyServiceText(text)) {
+    if (frequencySelect) frequencySelect.value = "bimonthly";
+    if (amountModeSelect) amountModeSelect.value = "variable";
+    if (sharedBox) sharedBox.checked = true;
+    if (notesField) notesField.value = mergeRuleNotes(notesField.value, ["Regla servicio: agua/gas bimensual y a mes vencido."]);
+    return;
+  }
+
+  if (type === "expense" && isHouseServiceText(text)) {
+    if (amountModeSelect) amountModeSelect.value = "variable";
+    if (sharedBox) sharedBox.checked = true;
+    if (notesField) notesField.value = mergeRuleNotes(notesField.value, ["Regla servicio: pago a mes vencido."]);
+    return;
+  }
+
+  if (type === "expense" && isHouseFoodText(text)) {
+    if (frequencySelect) frequencySelect.value = "monthly";
+    if (dayInput) dayInput.value = String(clampPayrollDay(dayInput.value || 1));
+    if (sharedBox) sharedBox.checked = true;
+    if (notesField) notesField.value = mergeRuleNotes(notesField.value, ["Regla comida de casa: se paga al principio del mes, cuando entran las nóminas."]);
+  }
+}
+
+function applySmartExpenseRulesToForm(form) {
+  if (!form) return;
+  const f = new FormData(form);
+  const text = formRuleText(f);
+  const kind = form.querySelector('[name="kind"]');
+  const sharedBox = form.querySelector('[name="is_shared"]');
+  const shareMethod = form.querySelector('[name="share_method"]');
+  if (isHouseExpenseText(text)) {
+    if (kind && kind.value !== "shared") kind.value = "shared";
+    if (sharedBox) sharedBox.checked = true;
+    if (shareMethod && !shareMethod.value) shareMethod.value = "equal";
+  }
+}
+
 function recurringViewMonthKeys() {
   const keys = new Set();
   const active = activeMonth();
@@ -2120,7 +2275,7 @@ const F360V3 = (() => {
     return { targetId, label, rows, totalAssigned, totalHouse, personalTotal };
   }
 
-  const HOUSE_POT_MONTHLY_CONTRIBUTION = 450;
+  const HOUSE_POT_MONTHLY_CONTRIBUTION = HOUSE_POT_MONTHLY_CONTRIBUTION_DEFAULT;
 
   function housePotActiveContributors() {
     return contributionMembers()
@@ -2136,11 +2291,11 @@ const F360V3 = (() => {
 
   function housePotSharedRows(month = activeMonth()) {
     const rawShared = getVisibleMovements()
-      .filter(x => x.type === "expense" && x.is_shared && isSameMonth(x.date, month))
+      .filter(x => isSameMonth(x.date, month) && shouldAffectHousePot(x))
       .map(item => ({
         item,
-        amount: Number(item.amount || 0),
-        concept: item.description || categoryName(item.category_id) || "Gasto compartido",
+        amount: Number(item._original_amount || item.amount || 0),
+        concept: item.description || categoryName(item.category_id) || "Gasto de casa",
         category: categoryName(item.category_id) || "Sin categoría"
       }))
       .sort((a, b) => b.amount - a.amount);
@@ -2216,9 +2371,9 @@ const F360V3 = (() => {
     const availableNow = Math.max(0, pot.remaining);
     const shortfallNow = Math.max(0, pot.shortfall);
     const availableHint = availableNow > 0
-      ? `Quedan ${money(availableNow)} para este mes`
+      ? `${pot.contributors.length} aporte(s): ${money(pot.available)} · gastos casa: ${money(pot.spent)}`
       : pot.shortfall > 0
-        ? "Sin margen disponible"
+        ? `${pot.contributors.length} aporte(s): ${money(pot.available)} · pote agotado`
         : "Mes cubierto";
     const shortfallHint = shortfallNow > 0
       ? "Aporte extra necesario"
@@ -2246,7 +2401,7 @@ const F360V3 = (() => {
         <div>
           <span class="analytics-pill">Pote del hogar</span>
           <h4>Fondo común de ${escapeHtml(monthLabel)}</h4>
-          <p class="sub">Cada integrante activo aporta ${money(HOUSE_POT_MONTHLY_CONTRIBUTION)}. De ese pote salen alquiler, comida, internet, agua, luz, gas y demás gastos de casa.</p>
+          <p class="sub">Cada integrante activo aporta ${money(HOUSE_POT_MONTHLY_CONTRIBUTION)}. El pote arranca con ${money(pot.expected)} al mes y solo se descuenta con gastos de casa: alquiler, comida, internet, agua, luz, gas y compras del hogar.</p>
           ${personalLine}
         </div>
         <div class="house-pot-status-card">
@@ -2263,9 +2418,9 @@ const F360V3 = (() => {
         </div>
       </div>
       <div class="house-pot-stats">
-        <div><span>Aporte esperado</span><strong>${money(pot.expected)}</strong><em>${pot.contributors.length} integrante(s) activo(s)</em></div>
+        <div><span>Aportes del mes</span><strong>${money(pot.expected)}</strong><em>${pot.contributors.length} integrante(s) × ${money(HOUSE_POT_MONTHLY_CONTRIBUTION)}</em></div>
         <div><span>Sobrante acumulado</span><strong>${money(pot.previousCarry)}</strong><em>Viene de meses anteriores</em></div>
-        <div><span>Gastos de casa</span><strong>${money(pot.spent)}</strong><em>Compartidos del mes</em></div>
+        <div><span>Gastos de casa</span><strong>${money(pot.spent)}</strong><em>Solo hogar: no gasolina ni gastos personales</em></div>
         <div><span>Cobertura</span><strong>${pot.coveragePct}%</strong><em>${pot.shortfall > 0 ? "Necesita refuerzo" : "Cubierto"}</em></div>
       </div>
       <div class="house-pot-progress"><span style="width:${pot.coveragePct}%"></span></div>
@@ -2466,13 +2621,13 @@ const F360V3 = (() => {
 
   function renderRegister() {
     return `
-      <section class="section-header"><div class="section-icon-row"><div class="section-badge">🖊️</div><div><h3>Registrar movimientos</h3><p>Primero eliges qué necesitas registrar; la app muestra el formulario correcto para evitar duplicados y errores.</p></div></div></section>
-      <div class="help-banner"><span class="hb-icon">ℹ️</span><div><strong>La lógica queda separada por dentro, pero ordenada por fuera.</strong> Usa movimientos puntuales para pagos únicos y recurrentes para nóminas, servicios variables, deudas o cuotas.</div></div>
-      <article class="section-card register-flow-card"><h4>¿Qué quieres registrar?</h4><div class="register-choice-grid" id="registerFlowChoices"><button class="register-choice-btn active" data-flow-target="incomePanel" type="button"><b>➕ Ingreso puntual</b><span>Nómina cobrada una vez, factura, venta, freelance o dinero que entra este mes.</span></button><button class="register-choice-btn" data-flow-target="expensePanel" type="button"><b>➖ Gasto puntual</b><span>Compra, factura pagada, comida, transporte o gasto único del mes.</span></button><button class="register-choice-btn" data-flow-target="recurringPanel" type="button"><b>↻ Recurrente, deuda o servicio variable</b><span>Pagos que se repiten, cambian de importe o necesitan planificación.</span></button></div><div class="register-flow-hint">Tip: los gastos comunes deben marcarse como compartidos para que aparezcan en Aportes y Casa común.</div></article>
+      <section class="section-header"><div class="section-icon-row"><div class="section-badge">🖊️</div><div><h3>Registrar movimientos</h3><p>En teléfono esta sección queda como prioridad. Aquí cargas ingresos, gasto hormiga y gastos recurrentes sin mezclar el pote de casa con gastos personales.</p></div></div></section>
+      <div class="help-banner"><span class="hb-icon">ℹ️</span><div><strong>Reglas automáticas:</strong> nóminas del 1 al 7 del mes siguiente trabajado; servicios a mes vencido; agua y gas bimensual; comida de casa al principio de mes.</div></div>
+      <article class="section-card register-flow-card"><h4>¿Qué quieres registrar?</h4><div class="register-choice-grid" id="registerFlowChoices"><button class="register-choice-btn active" data-flow-target="incomePanel" type="button"><b>➕ Ingresos</b><span>Nómina cobrada, factura, venta, freelance o dinero que entra este mes.</span></button><button class="register-choice-btn" data-flow-target="expensePanel" type="button"><b>🐜 Gasto hormiga / puntual</b><span>Compra única, comida de casa, transporte, pan, queso, jamón o gasto pequeño del día.</span></button><button class="register-choice-btn" data-flow-target="recurringPanel" type="button"><b>↻ Gastos recurrentes</b><span>Nóminas, servicios, comida mensual, deudas, cuotas y pagos bimensuales.</span></button></div><div class="register-flow-hint">Tip: si escribes luz, agua, gas, internet, mercado, jamón, queso o pan, la app lo detecta como casa y lo descuenta del fondo común. Gasolina y vehículo quedan fuera del pote.</div></article>
       <section class="register-single-grid">
         <article class="section-card register-panel" id="incomePanel"><h4 id="incomeFormTitle">Nuevo ingreso puntual</h4><form id="incomeForm"><input name="id" type="hidden" /><div class="inline-grid"><div class="field"><label>Concepto</label><input name="concept" required placeholder="Ej. Nómina DirectMarkt" /></div><div class="field"><label>Monto</label><input name="amount" type="number" step="0.01" min="0" required placeholder="0,00" /></div></div><div class="inline-grid"><div class="field"><label>Fecha</label><input name="date" type="date" value="${todayISO()}" /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions("income")}</select></div></div><div class="field"><label>Miembro</label><select name="member_id">${memberOptions(state.user.id)}</select></div><div class="field"><label>Notas</label><textarea name="notes" placeholder="Opcional"></textarea></div><div class="form-actions"><button class="btn primary" id="saveIncomeBtn" type="submit">Guardar ingreso</button><button class="btn ghost" type="button" id="cancelIncomeEdit" hidden>Cancelar edición</button></div></form></article>
-        <article class="section-card register-panel" id="expensePanel"><h4 id="expenseFormTitle">Nuevo gasto puntual</h4><form id="expenseForm"><input name="id" type="hidden" /><div class="inline-grid"><div class="field"><label>Concepto</label><input name="concept" required placeholder="Ej. Compra, gas, comida, gasolina" /></div><div class="field"><label>Monto total</label><input name="amount" type="number" step="0.01" min="0" required placeholder="0,00" /></div></div><div class="inline-grid"><div class="field"><label>Fecha</label><input name="date" type="date" value="${todayISO()}" /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions("expense")}</select></div></div><div class="inline-grid"><div class="field"><label>Responsable</label><select name="member_id">${memberOptions(state.user.id)}</select></div><div class="field"><label>Tipo de gasto</label><select name="kind"><option value="personal">Personal</option><option value="shared">Compartido / casa</option><option value="debt">Deuda</option><option value="vehicle">Vehículo</option></select></div></div><label class="switch-row"><span><strong>¿Gasto compartido?</strong><br><span class="hint">Alquiler, comida de casa, luz, agua, gas, internet...</span></span><input name="is_shared" type="checkbox" /></label><div class="field"><label>Método de reparto</label><select name="share_method"><option value="equal">Partes iguales</option><option value="income">Según ingresos</option><option value="manual">Manual</option></select></div><div class="field"><label>Notas</label><textarea name="notes" placeholder="Opcional"></textarea></div><div class="form-actions"><button class="btn primary" id="saveExpenseBtn" type="submit">Guardar gasto</button><button class="btn ghost" type="button" id="cancelExpenseEdit" hidden>Cancelar edición</button></div></form></article>
-        <article class="section-card register-panel" id="recurringPanel"><h3>Recurrentes, deudas y servicios variables</h3><form id="recurringForm"><input name="id" type="hidden" /><h4 id="recurringFormTitle">Nuevo recurrente o servicio variable</h4><div class="inline-grid"><div class="field"><label>Concepto</label><input name="description" required placeholder="Ej. Nómina, luz, agua, gas, crédito coche, comida de Papito" /></div><div class="field"><label>Importe mensual / estimado</label><input name="amount" type="number" step="0.01" min="0" required placeholder="0,00" /></div></div><div class="inline-grid"><div class="field"><label>Empieza en</label><input name="start_date" type="date" value="${todayISO()}" /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions()}</select></div></div><div class="inline-grid"><div class="field"><label>Persona</label><select name="member_id">${memberOptions(state.user.id)}</select></div><div class="field"><label>Tipo de automático</label><select name="type"><option value="expense">Gasto</option><option value="income">Ingreso</option></select></div></div><div class="inline-grid"><div class="field"><label>Día de cargo</label><input name="day_of_month" type="number" min="1" max="31" value="1" /></div><div class="field"><label>Frecuencia</label><select name="frequency"><option value="monthly">Mensual</option><option value="bimonthly">Bimensual</option><option value="yearly">Anual</option></select></div></div><div class="inline-grid"><div class="field"><label>Tipo de importe</label><select name="amount_mode"><option value="fixed">Fijo</option><option value="variable">Variable</option></select></div><div class="field"><label>¿Hasta cuándo se repite?</label><select name="end_mode"><option value="indefinite">Indefinido</option><option value="months">Por meses</option><option value="years">Por años</option><option value="date">Hasta fecha</option></select></div></div><div class="inline-grid"><div class="field"><label>Nº de meses</label><input name="fixed_months" type="number" min="1" placeholder="Si elegiste por meses" /></div><div class="field"><label>Nº de años / fecha fin</label><div class="inline-grid compact-inner"><input name="fixed_years" type="number" min="1" placeholder="Años" /><input name="end_date" type="date" /></div></div></div><h4>Datos de deuda o préstamo</h4><div class="inline-grid"><div class="field"><label>Importe total original</label><input name="debt_original_amount" type="number" step="0.01" placeholder="Ej. 11000" /></div><div class="field"><label>Entidad / referencia</label><input name="debt_lender" placeholder="Ej. Sofinco, Campus Training" /></div></div><label class="switch-row"><span><strong>¿Automático compartido?</strong><br><span class="hint">Útil para alquiler, luz, agua, gas, internet o comida de casa.</span></span><input name="is_shared" type="checkbox" /></label><label class="switch-row"><span><strong>Activo</strong><br><span class="hint">Desactívalo cuando ya no aplique.</span></span><input name="active" type="checkbox" checked /></label><div class="field"><label>Notas</label><textarea name="notes" placeholder="Cuota coche, agua bimensual, comida mensual del perro..."></textarea></div><div class="form-actions"><button class="btn primary" id="saveRecurringBtn" type="submit">Guardar automático</button><button class="btn ghost" type="button" id="cancelRecurringEdit" hidden>Cancelar edición</button></div></form></article>
+        <article class="section-card register-panel" id="expensePanel"><h4 id="expenseFormTitle">Nuevo gasto hormiga / puntual</h4><form id="expenseForm"><input name="id" type="hidden" /><div class="inline-grid"><div class="field"><label>Concepto</label><input name="concept" required placeholder="Ej. Pan, queso, jamón, luz, gasolina" /></div><div class="field"><label>Monto total</label><input name="amount" type="number" step="0.01" min="0" required placeholder="0,00" /></div></div><div class="inline-grid"><div class="field"><label>Fecha</label><input name="date" type="date" value="${todayISO()}" /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions("expense")}</select></div></div><div class="inline-grid"><div class="field"><label>Responsable</label><select name="member_id">${memberOptions(state.user.id)}</select></div><div class="field"><label>Tipo de gasto</label><select name="kind"><option value="personal">Personal</option><option value="shared">Casa / fondo común</option><option value="debt">Deuda</option><option value="vehicle">Vehículo</option></select></div></div><label class="switch-row"><span><strong>¿Gasto compartido?</strong><br><span class="hint">Alquiler, comida de casa, luz, agua, gas, internet...</span></span><input name="is_shared" type="checkbox" /></label><div class="field"><label>Método de reparto</label><select name="share_method"><option value="equal">Partes iguales</option><option value="income">Según ingresos</option><option value="manual">Manual</option></select></div><div class="field"><label>Notas</label><textarea name="notes" placeholder="Opcional"></textarea></div><div class="form-actions"><button class="btn primary" id="saveExpenseBtn" type="submit">Guardar gasto</button><button class="btn ghost" type="button" id="cancelExpenseEdit" hidden>Cancelar edición</button></div></form></article>
+        <article class="section-card register-panel" id="recurringPanel"><h3>Recurrentes, deudas y servicios variables</h3><form id="recurringForm"><input name="id" type="hidden" /><h4 id="recurringFormTitle">Nuevo recurrente o servicio variable</h4><div class="inline-grid"><div class="field"><label>Concepto</label><input name="description" required placeholder="Ej. Nómina, luz, agua, gas, crédito coche, comida de Papito" /></div><div class="field"><label>Importe mensual / estimado</label><input name="amount" type="number" step="0.01" min="0" required placeholder="0,00" /></div></div><div class="inline-grid"><div class="field"><label>Primera fecha de pago</label><input name="start_date" type="date" value="${todayISO()}" /></div><div class="field"><label>Categoría</label><select name="category_id">${categoryOptions()}</select></div></div><div class="inline-grid"><div class="field"><label>Persona</label><select name="member_id">${memberOptions(state.user.id)}</select></div><div class="field"><label>Tipo de automático</label><select name="type"><option value="expense">Gasto</option><option value="income">Ingreso</option></select></div></div><div class="inline-grid"><div class="field"><label>Día de pago/cargo</label><input name="day_of_month" type="number" min="1" max="31" value="1" /></div><div class="field"><label>Frecuencia</label><select name="frequency"><option value="monthly">Mensual</option><option value="bimonthly">Bimensual</option><option value="yearly">Anual</option></select></div></div><div class="inline-grid"><div class="field"><label>Tipo de importe</label><select name="amount_mode"><option value="fixed">Fijo</option><option value="variable">Variable</option></select></div><div class="field"><label>¿Hasta cuándo se repite?</label><select name="end_mode"><option value="indefinite">Indefinido</option><option value="months">Por meses</option><option value="years">Por años</option><option value="date">Hasta fecha</option></select></div></div><div class="inline-grid"><div class="field"><label>Nº de meses</label><input name="fixed_months" type="number" min="1" placeholder="Si elegiste por meses" /></div><div class="field"><label>Nº de años / fecha fin</label><div class="inline-grid compact-inner"><input name="fixed_years" type="number" min="1" placeholder="Años" /><input name="end_date" type="date" /></div></div></div><h4>Datos de deuda o préstamo</h4><div class="inline-grid"><div class="field"><label>Importe total original</label><input name="debt_original_amount" type="number" step="0.01" placeholder="Ej. 11000" /></div><div class="field"><label>Entidad / referencia</label><input name="debt_lender" placeholder="Ej. Sofinco, Campus Training" /></div></div><label class="switch-row"><span><strong>¿Automático compartido?</strong><br><span class="hint">Útil para alquiler, luz, agua, gas, internet o comida de casa.</span></span><input name="is_shared" type="checkbox" /></label><label class="switch-row"><span><strong>Activo</strong><br><span class="hint">Desactívalo cuando ya no aplique.</span></span><input name="active" type="checkbox" checked /></label><div class="field"><label>Notas</label><textarea name="notes" placeholder="Ej. nómina 1-7 mes siguiente; luz mes vencido; agua/gas bimensual; comida casa principio de mes..."></textarea></div><div class="form-actions"><button class="btn primary" id="saveRecurringBtn" type="submit">Guardar automático</button><button class="btn ghost" type="button" id="cancelRecurringEdit" hidden>Cancelar edición</button></div></form></article>
       </section>`;
   }
 
@@ -2883,8 +3038,14 @@ const F360V3 = (() => {
     document.getElementById('historyYearFilter')?.addEventListener('change', e => { state.filters.year = e.target.value; renderApp(); });
     document.querySelector('[data-open-expense]')?.addEventListener('click', () => { state.activeSection='register'; renderApp(); setTimeout(()=>document.getElementById('expensePanel')?.scrollIntoView({behavior:'smooth'}),50); });
     document.getElementById('incomeForm')?.addEventListener('submit', handleIncomeSubmit);
-    document.getElementById('expenseForm')?.addEventListener('submit', handleExpenseSubmit);
-    document.getElementById('recurringForm')?.addEventListener('submit', handleRecurringSubmit);
+    const expenseForm = document.getElementById('expenseForm');
+    const recurringForm = document.getElementById('recurringForm');
+    expenseForm?.addEventListener('input', () => applySmartExpenseRulesToForm(expenseForm));
+    expenseForm?.addEventListener('change', () => applySmartExpenseRulesToForm(expenseForm));
+    recurringForm?.addEventListener('input', () => applySmartRecurringRulesToForm(recurringForm));
+    recurringForm?.addEventListener('change', () => applySmartRecurringRulesToForm(recurringForm));
+    expenseForm?.addEventListener('submit', handleExpenseSubmit);
+    recurringForm?.addEventListener('submit', handleRecurringSubmit);
     document.getElementById('memberForm')?.addEventListener('submit', handleMemberSubmit);
     document.getElementById('cancelMemberEdit')?.addEventListener('click', resetMemberFormEdit);
     document.querySelectorAll('[data-edit-member]').forEach(btn => btn.addEventListener('click', () => fillMemberFormForEdit(btn.dataset.editMember)));
@@ -2953,8 +3114,13 @@ const F360V3 = (() => {
     } else if (!can("movements", "create") && !can("register", "create")) {
       return showToast("No tienes permiso para crear gastos.", "danger");
     }
-    const isShared = Boolean(f.get("is_shared")) || f.get("kind") === "shared";
-    const payload = { household_id: state.currentHouseholdId, user_id: state.user.id, member_id: safeAssignableMemberId(f.get("member_id")), type: "expense", amount: parseAmount(f.get("amount")), date: f.get("date") || todayISO(), category_id: f.get("category_id") || null, description: String(f.get("concept") || "Gasto").trim(), notes: String(f.get("notes") || "").trim(), kind: String(f.get("kind") || "personal"), share_method: String(f.get("share_method") || "equal"), is_shared: isShared };
+    const expenseText = formRuleText(f);
+    const autoHouseExpense = isHouseExpenseText(expenseText);
+    const requestedKind = String(f.get("kind") || "personal");
+    const isShared = Boolean(f.get("is_shared")) || requestedKind === "shared" || autoHouseExpense;
+    const normalizedKind = autoHouseExpense && requestedKind !== "vehicle" && requestedKind !== "debt" ? "shared" : requestedKind;
+    const notes = mergeRuleNotes(String(f.get("notes") || "").trim(), autoHouseExpense ? ["Auto: gasto de casa detectado; descuenta del fondo común."] : []);
+    const payload = { household_id: state.currentHouseholdId, user_id: state.user.id, member_id: safeAssignableMemberId(f.get("member_id")), type: "expense", amount: parseAmount(f.get("amount")), date: f.get("date") || todayISO(), category_id: f.get("category_id") || null, description: String(f.get("concept") || "Gasto").trim(), notes, kind: normalizedKind, share_method: isShared ? String(f.get("share_method") || "equal") : "none", is_shared: isShared };
     if (id) {
       await updateWithSchemaFallback("movements", payload, { id, household_id: state.currentHouseholdId }, "Gasto actualizado.", ["household_id","user_id","member_id","type","amount","date","category_id","description","is_shared"]);
     } else {
@@ -2972,28 +3138,63 @@ const F360V3 = (() => {
     } else if (!can("recurring", "create") && !can("register", "create")) {
       return showToast("No tienes permiso para crear recurrentes.", "danger");
     }
+    const recurringType = f.get("type") || "expense";
+    const recurringText = formRuleText(f);
+    const payrollRule = recurringType === "income" && isPayrollText(recurringText);
+    const bimonthlyServiceRule = recurringType === "expense" && isBimonthlyServiceText(recurringText);
+    const serviceRule = recurringType === "expense" && isHouseServiceText(recurringText);
+    const foodRule = recurringType === "expense" && isHouseFoodText(recurringText);
+    let dayOfMonth = Number(f.get("day_of_month") || 1);
+    let frequency = f.get("frequency") || "monthly";
+    let amountMode = f.get("amount_mode") || "fixed";
+    let isSharedRecurring = Boolean(f.get("is_shared"));
+    const ruleNotes = [];
+
+    if (payrollRule) {
+      dayOfMonth = clampPayrollDay(dayOfMonth || 5);
+      frequency = "monthly";
+      amountMode = "fixed";
+      ruleNotes.push("Regla nómina: se cobra del día 1 al 7 del mes siguiente trabajado.");
+    }
+    if (bimonthlyServiceRule) {
+      frequency = "bimonthly";
+      amountMode = "variable";
+      isSharedRecurring = true;
+      ruleNotes.push("Regla servicio: agua/gas bimensual y a mes vencido.");
+    } else if (serviceRule) {
+      amountMode = "variable";
+      isSharedRecurring = true;
+      ruleNotes.push("Regla servicio: pago a mes vencido.");
+    }
+    if (foodRule) {
+      frequency = "monthly";
+      dayOfMonth = clampPayrollDay(dayOfMonth || 1);
+      isSharedRecurring = true;
+      ruleNotes.push("Regla comida de casa: se paga al principio del mes, cuando entran las nóminas.");
+    }
+
     const payload = {
       household_id: state.currentHouseholdId,
       user_id: state.user.id,
       member_id: safeAssignableMemberId(f.get("member_id")),
-      type: f.get("type") || "expense",
+      type: recurringType,
       amount: parseAmount(f.get("amount")),
       category_id: f.get("category_id") || null,
       description: String(f.get("description") || "Recurrente").trim(),
-      day_of_month: Number(f.get("day_of_month") || 1),
-      frequency: f.get("frequency") || "monthly",
+      day_of_month: dayOfMonth,
+      frequency,
       active: Boolean(f.get("active")),
-      is_shared: Boolean(f.get("is_shared")),
+      is_shared: isSharedRecurring,
       start_date: f.get("start_date") || todayISO(),
-      kind: f.get("kind") || "fixed",
-      amount_mode: f.get("amount_mode") || "fixed",
+      kind: isSharedRecurring ? "shared" : (f.get("kind") || "fixed"),
+      amount_mode: amountMode,
       end_mode: f.get("end_mode") || "indefinite",
       fixed_months: f.get("fixed_months") ? Number(f.get("fixed_months")) : null,
       fixed_years: f.get("fixed_years") ? Number(f.get("fixed_years")) : null,
       end_date: f.get("end_date") || null,
       debt_original_amount: f.get("debt_original_amount") ? parseAmount(f.get("debt_original_amount")) : null,
       debt_lender: String(f.get("debt_lender") || "").trim() || null,
-      notes: String(f.get("notes") || "").trim()
+      notes: mergeRuleNotes(String(f.get("notes") || "").trim(), ruleNotes)
     };
     if (id) {
       await updateWithSchemaFallback("recurring_movements", payload, { id, household_id: state.currentHouseholdId }, "Recurrente actualizado.", ["household_id","user_id","member_id","type","amount","category_id","description","day_of_month","frequency","active","is_shared","start_date"]);

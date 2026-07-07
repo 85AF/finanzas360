@@ -11235,3 +11235,27 @@ body {
   display: block !important;
   margin: 0 !important;
 }
+
+/* ─────────────────────────────────────────────────────────────
+   PATCH Alberto · móvil primero Registrar + fondo común limpio
+   ───────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .app-old-mirror .old-menu button[data-section="register"],
+  .app-old-mirror .side-menu.old-menu button[data-section="register"] {
+    order: -50 !important;
+  }
+  .app-old-mirror .old-menu button[data-section="dashboard"],
+  .app-old-mirror .side-menu.old-menu button[data-section="dashboard"] {
+    order: -40 !important;
+  }
+  .app-old-mirror .register-flow-card {
+    order: -5 !important;
+  }
+  .app-old-mirror .house-pot-status-card {
+    grid-template-columns: 1fr !important;
+  }
+  .app-old-mirror .house-pot-person-row,
+  .app-old-mirror .house-pot-expense-row {
+    align-items: flex-start !important;
+  }
+}
